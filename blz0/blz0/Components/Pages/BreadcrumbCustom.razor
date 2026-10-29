@@ -1,0 +1,83 @@
+﻿@inject NavigationManager Navigation
+
+
+<div>
+    <Breadcrumb Items="NavItems1"></Breadcrumb>
+</div>
+
+@code {
+    private List<BreadcrumbItem>? NavItems1 { get; set; }
+
+    private static readonly Dictionary<string, string> SegmentLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["capacities"] = "Capacities",
+        ["dashboard"] = "Dashboard",
+        ["datasets"] = "Datasets",
+        ["eventlog"] = "Event Log",
+        ["lakehouses"] = "Lakehouses",
+        ["reports"] = "Reports",
+        ["tables"] = "Tables",
+        ["warehouses"] = "Warehouses",
+        ["workspaces"] = "Workspaces"
+    };
+
+    protected override void OnInitialized()
+    {
+        NavItems1 = BuildBreadcrumbItems();
+    }
+
+    private List<BreadcrumbItem> BuildBreadcrumbItems()
+    {
+        var relativePath = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            return new List<BreadcrumbItem>
+            {
+                new BreadcrumbItem { Text = "Home", IsCurrentPage = true }
+            };
+        }
+
+        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var items = new List<BreadcrumbItem>
+        {
+            new BreadcrumbItem { Text = "Home", Href = "/" }
+        };
+
+        var firstSegment = segments[0];
+        var sectionText = GetSegmentText(firstSegment);
+        var hasTrailingSegment = segments.Length > 1;
+
+        items.Add(new BreadcrumbItem
+        {
+            Text = sectionText,
+            Href = hasTrailingSegment ? $"/{firstSegment}" : null,
+            IsCurrentPage = !hasTrailingSegment
+        });
+
+        if (hasTrailingSegment)
+        {
+            items.Add(new BreadcrumbItem
+            {
+                Text = GetCurrentPageText(segments),
+                IsCurrentPage = true
+            });
+        }
+
+        return items;
+    }
+
+    private static string GetCurrentPageText(string[] segments)
+    {
+        if (segments.Length >= 3 && segments[0].Equals("workspaces", StringComparison.OrdinalIgnoreCase) && segments[1].Equals("details", StringComparison.OrdinalIgnoreCase))
+        {
+            return segments[2];
+        }
+
+        return segments[^1];
+    }
+
+    private static string GetSegmentText(string segment)
+    {
+        return SegmentLabels.TryGetValue(segment, out var label) ? label : segment;
+    }
+}

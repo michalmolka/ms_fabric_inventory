@@ -1,0 +1,234 @@
+@page "/warehouses/{workspaceId}/{warehouseId}"
+@rendermode InteractiveServer
+@using Models
+@using Operations
+@using SharedServices
+@using Microsoft.Identity.Client
+@using Microsoft.Identity.Web
+@inject FabricApiData FabricApiData
+@inject WarehouseMetadataData WarehouseMetadataData
+@inject SharedFabricAuth SharedFabricAuth
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>Warehouse Details</PageTitle>
+<BreadcrumbCustom />
+<h3>Warehouse Details</h3>
+<button type="button" class="btn btn-outline-secondary mb-3" @onclick="GoBackAsync">Back</button>
+
+@if (!string.IsNullOrWhiteSpace(errorText))
+{
+    <p class="text-danger fw-semibold">@errorText</p>
+}
+else if (warehouse == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-bordered table-striped">
+        <tbody>
+            <tr><th>Id</th><td>@warehouse.Id</td></tr>
+            <tr><th>Name</th><td>@warehouse.DisplayName</td></tr>
+            <tr><th>Description</th><td>@warehouse.Description</td></tr>
+            <tr><th>Type</th><td>@warehouse.Type</td></tr>
+            <tr>
+                <th>Workspace Id</th>
+                <td>
+                    @if (!string.IsNullOrWhiteSpace(workspaceId))
+                    {
+                        <NavLink href="@($"/workspaces/details/{workspaceId}")">@workspaceId</NavLink>
+                    }
+                </td>
+            </tr>
+            <tr><th>Folder Id</th><td>@warehouse.FolderId</td></tr>
+            <tr><th>Connection String</th><td>@warehouse.ConnectionString</td></tr>
+            <tr><th>Created Date</th><td>@FormatDate(warehouse.CreatedDate)</td></tr>
+            <tr><th>Last Updated Time</th><td>@FormatDate(warehouse.LastUpdatedTime)</td></tr>
+            <tr><th>Collation Type</th><td>@warehouse.CollationType</td></tr>
+        </tbody>
+    </table>
+
+    <section class="mt-4">
+        <h4>Tables</h4>
+        @if (!string.IsNullOrWhiteSpace(tablesErrorText))
+        {
+            <p class="text-danger fw-semibold">@tablesErrorText</p>
+        }
+        else if (warehouseTables == null)
+        {
+            <p>Loading tables...</p>
+        }
+        else if (warehouseTables.Count == 0)
+        {
+            <p>No tables found.</p>
+        }
+        else
+        {
+            <div class="table-scroll-x">
+                <table class="table table-bordered table-striped">
+                    <thead>
+                        <tr>
+                            <th>Schema</th>
+                            <th>Table</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var table in warehouseTables)
+                        {
+                            <tr>
+                                <td>@DisplayValue(table.SchemaName)</td>
+                                <td>@DisplayValue(table.TableName)</td>
+                                <td>@DisplayValue(table.TableType)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter]
+    public string? workspaceId { get; set; }
+
+    [Parameter]
+    public string? warehouseId { get; set; }
+
+    private Warehouse? warehouse;
+    private List<WarehouseTable>? warehouseTables;
+    private string? errorText;
+    private string? tablesErrorText;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        errorText = null;
+        tablesErrorText = null;
+        warehouse = null;
+        warehouseTables = null;
+
+        if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(warehouseId))
+        {
+            errorText = "Missing workspace id or warehouse id.";
+            return;
+        }
+
+        try
+        {
+            var client = await GetFabricRestClientForDetailsAsync();
+            if (client == null)
+            {
+                errorText = "Fabric token is not ready.";
+                return;
+            }
+
+            await FabricApiData.GetWarehousesApiAsync(client, workspaceId);
+            warehouse = (FabricApiData.warehousesList ?? [])
+                .FirstOrDefault(e => string.Equals(e.Id, warehouseId, StringComparison.OrdinalIgnoreCase));
+            if (warehouse == null)
+            {
+                errorText = "Warehouse not found.";
+                return;
+            }
+
+            try
+            {
+                var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+                if (authState.User.Identity?.IsAuthenticated != true)
+                {
+                    tablesErrorText = "User is not authenticated yet.";
+                    return;
+                }
+
+                warehouseTables = await WarehouseMetadataData.GetWarehouseTablesAsync(
+                    authState.User,
+                    warehouse.ConnectionString,
+                    warehouse.DisplayName);
+            }
+            catch (Exception ex)
+            {
+                if (IsUiRequiredTokenException(ex))
+                {
+                    tablesErrorText = GetWarehouseTablesConsentMessage();
+                    return;
+                }
+
+                tablesErrorText = ex.Message;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (IsUiRequiredTokenException(ex))
+            {
+                RedirectForConsent();
+                return;
+            }
+
+            errorText = ex.Message;
+        }
+    }
+
+    private async Task<HttpClient?> GetFabricRestClientForDetailsAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        return await SharedFabricAuth.FabricAuth.GetFabricApiClientAsync(user);
+    }
+
+    private static string FormatDate(DateTime? value)
+    {
+        return value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+    }
+
+    private static string DisplayValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "-" : value;
+    }
+
+    private async Task GoBackAsync()
+    {
+        await JS.InvokeVoidAsync("history.back");
+    }
+
+    private void RedirectForConsent()
+    {
+        errorText = "Fabric requires sign-in or consent. Redirecting...";
+        var returnUrl = Uri.EscapeDataString(Navigation.ToBaseRelativePath(Navigation.Uri));
+        Navigation.NavigateTo($"/MicrosoftIdentity/Account/SignIn?redirectUri=/{returnUrl}", forceLoad: true);
+    }
+
+    private static string GetWarehouseTablesConsentMessage()
+    {
+        return "Warehouse table listing needs consent for the Azure SQL Database delegated permission and access to this Warehouse SQL endpoint. Add or approve the Azure SQL Database user_impersonation permission, then sign out and sign in again.";
+    }
+
+    private static bool IsUiRequiredTokenException(Exception ex)
+    {
+        if (ex is MicrosoftIdentityWebChallengeUserException)
+        {
+            return true;
+        }
+
+        if (ex is MsalUiRequiredException)
+        {
+            return true;
+        }
+
+        if (ex.InnerException is MsalUiRequiredException)
+        {
+            return true;
+        }
+
+        return ex.Message.Contains("No account or login hint was passed to the AcquireTokenSilent call", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("user_null", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("IDW10502", StringComparison.OrdinalIgnoreCase);
+    }
+}

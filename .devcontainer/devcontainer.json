@@ -1,0 +1,39 @@
+{
+  "name": "powerbi_blazor",
+  "image": "mcr.microsoft.com/devcontainers/dotnet:1-9.0",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csdevkit",
+        "ms-dotnettools.csharp",
+        "ms-mssql.mssql"
+      ]
+    }
+  },
+  "containerEnv": {
+    "ASPNETCORE_ENVIRONMENT": "Development"
+  },
+  "runArgs": [
+    "--env-file",
+    "${localWorkspaceFolder}/.env"
+  ],
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/home/vscode/.dotnet/tools"
+  },
+  "forwardPorts": [
+    5171,
+    7038
+  ],
+  "portsAttributes": {
+    "5171": {
+      "label": "Blazor HTTP",
+      "onAutoForward": "notify"
+    },
+    "7038": {
+      "label": "Blazor HTTPS",
+      "onAutoForward": "silent"
+    }
+  },
+  "postCreateCommand": "dotnet restore blz0.sln && (dotnet tool update --global dotnet-ef --version 9.0.2 || dotnet tool install --global dotnet-ef --version 9.0.2)",
+  "remoteUser": "vscode"
+}

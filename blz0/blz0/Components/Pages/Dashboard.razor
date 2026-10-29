@@ -1,0 +1,303 @@
+﻿@page "/dashboard"
+@using Models
+@using Operations
+@inject FabricSqlData FabricSqlData
+@rendermode InteractiveServer
+
+<PageTitle>Dashboard</PageTitle>
+<BreadcrumbCustom />
+<h3>Dashboard</h3>
+
+@if (stats == null)
+{
+    <div class="dashboard-empty">Loading dashboard...</div>
+}
+else
+{
+    <div class="dashboard-grid dashboard-kpis">
+        <div class="dashboard-kpi">
+            <span class="dashboard-kpi-label">Capacities</span>
+            <strong>@stats.ActiveCapacities</strong>
+            <span>@stats.InactiveCapacities inactive</span>
+        </div>
+        <div class="dashboard-kpi">
+            <span class="dashboard-kpi-label">Workspaces</span>
+            <strong>@stats.ActiveWorkspaces</strong>
+            <span>@stats.InactiveWorkspaces inactive</span>
+        </div>
+        <div class="dashboard-kpi">
+            <span class="dashboard-kpi-label">Datasets</span>
+            <strong>@stats.ActiveDatasets</strong>
+            <span>@stats.InactiveDatasets inactive</span>
+        </div>
+        <div class="dashboard-kpi">
+            <span class="dashboard-kpi-label">Reports</span>
+            <strong>@stats.ActiveReports</strong>
+            <span>@stats.InactiveReports inactive</span>
+        </div>
+    </div>
+
+    <div class="dashboard-grid dashboard-charts">
+        <section class="dashboard-panel dashboard-panel-wide dashboard-panel-hero">
+            <div class="dashboard-panel-header">
+                <h4>Inventory</h4>
+                <span>Active objects in SQL cache</span>
+            </div>
+            <BarChart @ref="inventoryChart" Height="310" />
+        </section>
+
+        <section class="dashboard-panel">
+            <div class="dashboard-panel-header">
+                <h4>Cache Status</h4>
+                <span>Active vs inactive records</span>
+            </div>
+            <DoughnutChart @ref="statusChart" Height="310" />
+        </section>
+
+        <section class="dashboard-panel">
+            <div class="dashboard-panel-header">
+                <h4>Dataset Modes</h4>
+                <span>Target storage mode</span>
+            </div>
+            <PieChart @ref="storageModeChart" Height="310" />
+        </section>
+
+        <section class="dashboard-panel">
+            <div class="dashboard-panel-header">
+                <h4>Report Types</h4>
+                <span>Reports by type</span>
+            </div>
+            <PolarAreaChart @ref="reportTypeChart" Height="310" />
+        </section>
+
+        <section class="dashboard-panel dashboard-panel-wide">
+            <div class="dashboard-panel-header dashboard-panel-header-row">
+                <div>
+                    <h4>Top Areas</h4>
+                    <span>@RankingSubtitle</span>
+                </div>
+                <div class="active-filter btn-group" role="group" aria-label="Ranking metric">
+                    <button type="button" class='@GetRankingButtonClass("datasets")' @onclick="ShowDatasetRankingAsync">Datasets</button>
+                    <button type="button" class='@GetRankingButtonClass("reports")' @onclick="ShowReportRankingAsync">Reports</button>
+                    <button type="button" class='@GetRankingButtonClass("workspaces")' @onclick="ShowWorkspaceRankingAsync">Workspaces</button>
+                </div>
+            </div>
+
+            <div class="dashboard-ranking">
+                @foreach (var item in CurrentRanking)
+                {
+                    <div class="dashboard-rank-row">
+                        <div class="dashboard-rank-label" title="@item.Label">@item.Label</div>
+                        <div class="dashboard-rank-track">
+                            <span style="@GetRankWidth(item.Value)"></span>
+                        </div>
+                        <strong>@item.Value</strong>
+                    </div>
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private DashboardStats? stats;
+    private BarChart inventoryChart = default!;
+    private DoughnutChart statusChart = default!;
+    private PieChart storageModeChart = default!;
+    private PolarAreaChart reportTypeChart = default!;
+    private bool chartsInitialized;
+    private string rankingMode = "datasets";
+
+    private IReadOnlyList<DashboardSlice> CurrentRanking => rankingMode switch
+    {
+        "reports" => stats?.ReportsByWorkspace ?? [],
+        "workspaces" => stats?.WorkspacesByCapacity ?? [],
+        _ => stats?.DatasetsByWorkspace ?? []
+    };
+
+    private string RankingSubtitle => rankingMode switch
+    {
+        "reports" => "Workspaces with the most active reports",
+        "workspaces" => "Capacities with the most active workspaces",
+        _ => "Workspaces with the most active datasets"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        stats = await FabricSqlData.GetDashboardStatsAsync();
+        FabricSqlData.capacitiesCount = stats.ActiveCapacities;
+        FabricSqlData.workspacesCount = stats.ActiveWorkspaces;
+        FabricSqlData.datasetsCount = stats.ActiveDatasets;
+        FabricSqlData.reportsCount = stats.ActiveReports;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!chartsInitialized && stats != null)
+        {
+            await inventoryChart.InitializeAsync(CreateInventoryData(), CreateInventoryOptions());
+            await statusChart.InitializeAsync(CreateStatusData(), CreateDoughnutOptions());
+            await storageModeChart.InitializeAsync(CreateStorageModeData(), CreatePieOptions());
+            await reportTypeChart.InitializeAsync(CreateReportTypeData(), CreatePolarOptions());
+            chartsInitialized = true;
+        }
+
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private Task ShowDatasetRankingAsync()
+    {
+        rankingMode = "datasets";
+        return Task.CompletedTask;
+    }
+
+    private Task ShowReportRankingAsync()
+    {
+        rankingMode = "reports";
+        return Task.CompletedTask;
+    }
+
+    private Task ShowWorkspaceRankingAsync()
+    {
+        rankingMode = "workspaces";
+        return Task.CompletedTask;
+    }
+
+    private string GetRankingButtonClass(string mode)
+    {
+        return rankingMode == mode ? "btn btn-warning active" : "btn btn-outline-secondary";
+    }
+
+    private string GetRankWidth(int value)
+    {
+        var max = CurrentRanking.Count == 0 ? 1 : Math.Max(1, CurrentRanking.Max(e => e.Value));
+        var width = Math.Max(6, value * 100 / max);
+        return $"width: {width}%";
+    }
+
+    private ChartData CreateInventoryData()
+    {
+        var labels = new List<string> { "Capacities", "Workspaces", "Datasets", "Reports" };
+        var datasets = new List<IChartDataset>
+        {
+            new BarChartDataset
+            {
+                Data = new List<double?> { stats!.ActiveCapacities, stats.ActiveWorkspaces, stats.ActiveDatasets, stats.ActiveReports },
+                BackgroundColor = new List<string> { "#ffd8b3", "#ffd6cc", "#ffe6a7", "#ffc9de" },
+                BorderColor = new List<string> { "#f4a261", "#f28482", "#e9c46a", "#f78fb3" },
+                BorderWidth = new List<double> { 1 }
+            }
+        };
+
+        return new ChartData { Labels = labels, Datasets = datasets };
+    }
+
+    private ChartData CreateStatusData()
+    {
+        var labels = new List<string> { "Active", "Inactive" };
+        var datasets = new List<IChartDataset>
+        {
+            new DoughnutChartDataset
+            {
+                Data = new List<double?> { stats!.ActiveTotal, stats.InactiveTotal },
+                BackgroundColor = new List<string> { "#ffb38a", "#ffe7d6" },
+                BorderColor = new List<string> { "#ef8354", "#f4c2a1" },
+                BorderWidth = new List<double> { 1 }
+            }
+        };
+
+        return new ChartData { Labels = labels, Datasets = datasets };
+    }
+
+    private ChartData CreateStorageModeData()
+    {
+        var slices = EnsureSlices(stats!.DatasetStorageModes, "No datasets");
+        var datasets = new List<IChartDataset>
+        {
+            new PieChartDataset
+            {
+                Data = slices.Select(e => (double?)e.Value).ToList(),
+                BackgroundColor = GetPalette(slices.Count),
+                BorderWidth = new List<double> { 1 }
+            }
+        };
+
+        return new ChartData { Labels = slices.Select(e => e.Label).ToList(), Datasets = datasets };
+    }
+
+    private ChartData CreateReportTypeData()
+    {
+        var slices = EnsureSlices(stats!.ReportTypes, "No reports");
+        var datasets = new List<IChartDataset>
+        {
+            new PolarAreaChartDataset
+            {
+                Data = slices.Select(e => (double?)e.Value).ToList(),
+                BackgroundColor = GetPalette(slices.Count),
+                BorderWidth = new List<double> { 1 }
+            }
+        };
+
+        return new ChartData { Labels = slices.Select(e => e.Label).ToList(), Datasets = datasets };
+    }
+
+    private static BarChartOptions CreateInventoryOptions()
+    {
+        var options = new BarChartOptions
+        {
+            Responsive = true,
+            Interaction = new Interaction { Mode = InteractionMode.Index },
+            IndexAxis = "x"
+        };
+
+        options.Scales.X!.Title = new ChartAxesTitle { Text = "Object type", Display = true };
+        options.Scales.Y!.Title = new ChartAxesTitle { Text = "Active records", Display = true };
+        options.Plugins.Legend.Display = false;
+        return options;
+    }
+
+    private static DoughnutChartOptions CreateDoughnutOptions()
+    {
+        var options = new DoughnutChartOptions { Responsive = true };
+        options.Plugins.Legend.Position = "bottom";
+        return options;
+    }
+
+    private static PieChartOptions CreatePieOptions()
+    {
+        var options = new PieChartOptions { Responsive = true };
+        options.Plugins.Legend.Position = "bottom";
+        return options;
+    }
+
+    private static PolarAreaChartOptions CreatePolarOptions()
+    {
+        var options = new PolarAreaChartOptions { Responsive = true };
+        options.Plugins.Legend.Position = "bottom";
+        return options;
+    }
+
+    private static List<DashboardSlice> EnsureSlices(List<DashboardSlice> slices, string emptyLabel)
+    {
+        return slices.Count == 0 ? [new DashboardSlice { Label = emptyLabel, Value = 1 }] : slices;
+    }
+
+    private static List<string> GetPalette(int count)
+    {
+        var palette = new List<string>
+        {
+            "#ffd8b3",
+            "#ffd6cc",
+            "#ffe6a7",
+            "#ffc9de",
+            "#ffd4a5",
+            "#f9c0aa",
+            "#f5b7b1",
+            "#ffe0b2"
+        };
+
+        return Enumerable.Range(0, count)
+            .Select(index => palette[index % palette.Count])
+            .ToList();
+    }
+}

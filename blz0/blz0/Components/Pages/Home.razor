@@ -1,0 +1,32 @@
+﻿@page "/"
+@using Authorization
+@inject FabricAuth FabricAuth
+@rendermode InteractiveServer
+
+<PageTitle>Home</PageTitle>
+<BreadcrumbCustom />
+<h3>Home</h3>
+
+<div class="dashboard-panel home-overview mt-3 mb-3">
+    <div class="home-overview-copy">
+        <div class="dashboard-panel-header">
+            <h4>What This App Does</h4>
+        </div>
+        <p>
+            This application helps teams monitor and manage Microsoft Fabric / Power BI objects in one place.
+            You can browse capacities, workspaces, datasets, reports, lakehouses, and warehouses, then open details and track refresh behavior.
+        </p>
+        <p>
+            It is designed for both regular users and inventory admins, with access filtered by permissions and cached SQL data for faster browsing.
+        </p>
+        <ul>
+            <li>View inventory tables for capacities, workspaces, datasets, reports, lakehouses, and warehouses.</li>
+            <li>Open object details and follow relationships between items.</li>
+            <li>Check dataset refresh status and trigger refresh actions.</li>
+            <li>Analyze Event Log data with KQL, aggregation, anomaly detection, and summary views.</li>
+        </ul>
+    </div>
+    <div class="home-overview-visual">
+        <img src="assets/brand/home_app.png" alt="Fabric Monitor app overview" />
+    </div>
+</div>

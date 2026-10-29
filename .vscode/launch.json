@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "blz0: debug",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build blz0",
+      "program": "${workspaceFolder}/blz0/blz0/bin/Debug/net9.0/blz0.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/blz0/blz0",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(http://\\S+)"
+      },
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://0.0.0.0:5171"
+      }
+    }
+  ]
+}

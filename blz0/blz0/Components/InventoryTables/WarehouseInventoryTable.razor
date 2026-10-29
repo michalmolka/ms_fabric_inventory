@@ -1,0 +1,63 @@
+@using BlazorBootstrap
+@using Models
+
+@if (Items == null)
+{
+    <p>No data.</p>
+}
+else
+{
+    <div class="table-scroll-x">
+        <Grid TItem="Warehouse"
+              Class="table table-hover table-bordered table-striped"
+              DataProvider="LoadItems"
+              AllowFiltering="true"
+              AllowPaging="true"
+              PageSize="15"
+              AllowSorting="true"
+              Responsive="true">
+            <GridColumns>
+                <GridColumn TItem="Warehouse" HeaderText="Id" class="fs-6 text-muted fw-light" PropertyName="Id" SortKeySelector="item => item.Id">
+                    @if (!string.IsNullOrWhiteSpace(context.Id) && !string.IsNullOrWhiteSpace(context.WorkspaceId))
+                    {
+                        <NavLink href="@($"/warehouses/{context.WorkspaceId}/{context.Id}")">@context.Id</NavLink>
+                    }
+                </GridColumn>
+                <GridColumn TItem="Warehouse" HeaderText="Name" class="fs-6 text-muted fw-light" PropertyName="DisplayName" SortKeySelector="item => item.DisplayName">
+                    @context.DisplayName
+                </GridColumn>
+                <GridColumn TItem="Warehouse" HeaderText="Status" class="fs-6 text-muted fw-light" PropertyName="IsActive" SortKeySelector="item => item.IsActive">
+                    <span class='badge @(context.IsActive ? "text-bg-success" : "text-bg-secondary")'>@(context.IsActive ? "Active" : "Inactive")</span>
+                </GridColumn>
+                <GridColumn TItem="Warehouse" HeaderText="WorkspaceId" class="fs-6 text-muted fw-light" PropertyName="WorkspaceId" SortKeySelector="item => item.WorkspaceId">
+                    @if (!string.IsNullOrWhiteSpace(context.WorkspaceId))
+                    {
+                        <NavLink href="@($"/workspaces/details/{context.WorkspaceId}")">@context.WorkspaceId</NavLink>
+                    }
+                </GridColumn>
+                <GridColumn TItem="Warehouse" HeaderText="CreatedDate" class="fs-6 text-muted fw-light" PropertyName="CreatedDate" SortKeySelector="item => item.CreatedDate">
+                    @context.CreatedDate
+                </GridColumn>
+                <GridColumn TItem="Warehouse" HeaderText="LastUpdatedTime" class="fs-6 text-muted fw-light" PropertyName="LastUpdatedTime" SortKeySelector="item => item.LastUpdatedTime">
+                    @context.LastUpdatedTime
+                </GridColumn>
+                <GridColumn TItem="Warehouse" HeaderText="CollationType" class="fs-6 text-muted fw-light" PropertyName="CollationType" SortKeySelector="item => item.CollationType">
+                    @context.CollationType
+                </GridColumn>
+                <GridColumn TItem="Warehouse" HeaderText="ConnectionString" class="fs-6 text-muted fw-light" PropertyName="ConnectionString" SortKeySelector="item => item.ConnectionString">
+                    @context.ConnectionString
+                </GridColumn>
+            </GridColumns>
+        </Grid>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IEnumerable<Warehouse>? Items { get; set; }
+
+    private Task<GridDataProviderResult<Warehouse>> LoadItems(GridDataProviderRequest<Warehouse> request)
+    {
+        return Task.FromResult(request.ApplyTo(Items?.ToList() ?? new List<Warehouse>()));
+    }
+}

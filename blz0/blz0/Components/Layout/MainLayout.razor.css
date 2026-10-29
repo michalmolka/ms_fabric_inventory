@@ -1,0 +1,97 @@
+.page {
+    position: relative;
+    display: flex;
+    min-height: 100vh;
+    background:
+        linear-gradient(180deg, rgba(242, 200, 17, 0.08), rgba(242, 200, 17, 0) 15rem),
+        var(--fabric-bg);
+}
+
+main {
+    flex: 1;
+    min-width: 0;
+}
+
+.user-chip-wrap {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.75rem 2rem 0 2rem;
+}
+
+.user-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.user-chip {
+    max-width: min(480px, 90%);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-action-link {
+    text-decoration: none;
+}
+
+.sidebar {
+    background:
+        linear-gradient(180deg, rgba(242, 200, 17, 0.18), rgba(0, 166, 166, 0.08) 42%, rgba(17, 24, 39, 0) 100%),
+        linear-gradient(180deg, var(--fabric-sidebar) 0%, var(--fabric-sidebar-2) 100%);
+    box-shadow: 10px 0 26px rgba(17, 24, 39, 0.16);
+}
+
+article {
+    max-width: none;
+    width: 100%;
+}
+
+@media (min-width: 641px) {
+    .page {
+        flex-direction: row;
+    }
+
+    .sidebar {
+        width: 250px;
+        height: 100vh;
+        position: sticky;
+        top: 0;
+    }
+
+    article {
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .user-chip-wrap {
+        padding: 0.75rem 1rem 0 1rem;
+    }
+}
+
+#blazor-error-ui {
+    color-scheme: light only;
+    background: #fff4c2;
+    border-top: 1px solid #f3da77;
+    bottom: 0;
+    box-shadow: 0 -1px 10px rgba(17, 24, 39, 0.18);
+    box-sizing: border-box;
+    color: #4a3600;
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+}

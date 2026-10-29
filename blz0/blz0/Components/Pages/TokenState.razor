@@ -1,0 +1,78 @@
+﻿@using SharedServices
+@using Microsoft.Identity.Client
+@using Microsoft.Identity.Web
+@inject SharedFabricAuth SharedFabricAuth
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+@if (!string.IsNullOrWhiteSpace(tokenError))
+{
+    <span class="badge text-bg-danger">@tokenError</span>
+}
+else if (SharedFabricAuth.IsTokenReady)
+{
+    <span class="badge text-bg-success">Token is ready.</span>
+}
+else
+{
+    <span class="badge text-bg-warning">Generating token...</span>
+}
+
+@code {
+    private string? tokenError;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !SharedFabricAuth.IsTokenReady)
+        {
+            try
+            {
+                var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+                if (authState.User.Identity?.IsAuthenticated != true)
+                {
+                    tokenError = "User is not authenticated yet.";
+                    StateHasChanged();
+                    return;
+                }
+
+                await SharedFabricAuth.FabricAuth.FabricAuthAutoAsync(authState.User);
+                await SharedFabricAuth.NotifyStateChangedAsync();
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                if (IsUiRequiredTokenException(ex))
+                {
+                    var returnUrl = Uri.EscapeDataString(Navigation.ToBaseRelativePath(Navigation.Uri));
+                    Navigation.NavigateTo($"/MicrosoftIdentity/Account/SignIn?redirectUri=/{returnUrl}", forceLoad: true);
+                    return;
+                }
+
+                tokenError = $"Power BI token error: {ex.Message}";
+                StateHasChanged();
+            }
+        }
+    }
+
+    private static bool IsUiRequiredTokenException(Exception ex)
+    {
+        if (ex is MicrosoftIdentityWebChallengeUserException)
+        {
+            return true;
+        }
+
+        if (ex is MsalUiRequiredException)
+        {
+            return true;
+        }
+
+        if (ex.InnerException is MsalUiRequiredException)
+        {
+            return true;
+        }
+
+        return ex.Message.Contains("No account or login hint was passed to the AcquireTokenSilent call", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("user_null", StringComparison.OrdinalIgnoreCase);
+    }
+}

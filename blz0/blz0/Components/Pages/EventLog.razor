@@ -1,0 +1,836 @@
+﻿@page "/eventlog"
+@using Operations;
+@using Azure.Identity;
+@using Kusto.Data;
+@using Kusto.Data.Net.Client;
+@using Models;
+@using System.Text.RegularExpressions;
+@inject FabricKqlData FabricKqlData;
+@inject AiKqlService AiKqlService
+@rendermode InteractiveServer
+
+<PageTitle>Event Log</PageTitle>
+<BreadcrumbCustom/>
+<h3>Event Log</h3>
+<div class="query-editor-wrap mb-3">
+    <div class="query-editor-head">
+        <label class="query-editor-label">KQL Query</label>
+        <div class="d-flex gap-2">
+            <Button Color="ButtonColor.Info" Class="ai-pill-btn ai-pill-btn-mode" @onclick="ToggleAiMode">AI Mode</Button>
+            <Button Color="ButtonColor.Warning" @onclick="SendQuery" Disabled="@isQueryRunning">
+                @if (isQueryRunning)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                }
+                Send query
+            </Button>
+        </div>
+    </div>
+    <textarea class="form-control query-editor-input" rows="6" @bind="queryText" @bind:event="oninput"></textarea>
+</div>
+@if (showAiMode)
+{
+    <div class="query-preview-wrap mb-3">
+        <div class="query-preview-label">AI KQL Generator</div>
+        <textarea class="form-control query-editor-input mb-2" rows="4" @bind="aiPrompt" @bind:event="oninput" placeholder="Describe what you want to analyze, e.g. show Notebook updates for workspace Iowa_Sales in last 30 days"></textarea>
+        <div class="d-flex gap-2 align-items-center">
+            <Button Color="ButtonColor.Info" Class="ai-pill-btn ai-pill-btn-generate" @onclick="GenerateKqlWithAi" Disabled="@isGeneratingAi">Generate KQL</Button>
+            <Button Color="ButtonColor.Secondary" @onclick="ApplyGeneratedKql" Disabled="@string.IsNullOrWhiteSpace(aiGeneratedQuery)">Apply</Button>
+            @if (isGeneratingAi)
+            {
+                <span class="text-muted">Generating...</span>
+            }
+        </div>
+        @if (!string.IsNullOrWhiteSpace(aiGeneratedQuery))
+        {
+            <div class="mt-2">
+                <label class="query-editor-label">AI suggestion</label>
+                <textarea class="form-control query-editor-input" rows="6" @bind="aiGeneratedQuery" @bind:event="oninput"></textarea>
+            </div>
+        }
+        @if (!string.IsNullOrWhiteSpace(aiStatus))
+        {
+            <div class="alert @aiStatusClass mt-2 mb-0">@aiStatus</div>
+        }
+    </div>
+}
+<div class="query-preview-wrap mb-3">
+    <div class="query-preview-label">Query Summary</div>
+    <div class="query-summary-grid">
+        <div class="query-summary-card">
+            <span>Rows limit</span>
+            <strong>@GetQueryTakeText()</strong>
+        </div>
+        <div class="query-summary-card">
+            <span>Time window</span>
+            <strong>@GetQueryTimeWindowText()</strong>
+        </div>
+        <div class="query-summary-card">
+            <span>Pipeline steps</span>
+            <strong>@GetQueryPipelineStepsText()</strong>
+        </div>
+        <div class="query-summary-card">
+            <span>Projected fields</span>
+            <strong>@GetProjectedFieldsCountText()</strong>
+        </div>
+    </div>
+    <div class="query-summary-detail">
+        <span>Active filter</span>
+        <code>@GetQueryFilterText()</code>
+    </div>
+    <div class="query-summary-detail">
+        <span>Output columns</span>
+        <code>@GetProjectedFieldsText()</code>
+    </div>
+</div>
+<br />
+@if (isQueryRunning)
+{
+    <div class="alert alert-info d-flex align-items-center gap-2" role="status">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <span>Loading Event Log data. Large KQL queries can take a few minutes.</span>
+    </div>
+}
+@if (!string.IsNullOrWhiteSpace(queryStatus))
+{
+    <div class="alert @queryStatusClass">@queryStatus</div>
+}
+@if(FabricKqlData.queryResult == null && !isQueryRunning)
+{
+    <span>No data.</span>
+}
+else if (FabricKqlData.queryResult != null)
+{
+    <div class="table-scroll-x">
+    <Grid TItem="EventLogs"
+    @key="queryVersion"
+    Class="table table-hover table-bordered table-striped"
+    DataProvider="eventsList"
+    AllowFiltering="true"
+    AllowPaging="true"
+    PageSize="5"
+    AllowSorting="true"
+    Responsive="true">
+
+        <GridColumns>
+            <GridColumn TItem="EventLogs" HeaderText="Id" class="fs-6 text-muted fw-light" PropertyName="Id" SortKeySelector="item => item.Id">
+                @context.Id
+            </GridColumn>
+            <GridColumn TItem="EventLogs" HeaderText="EventTime" class="fs-6 text-muted fw-light" PropertyName="EventTime" SortKeySelector="item => item.EventTime">
+                @context.EventTime
+            </GridColumn>
+            <GridColumn TItem="EventLogs" HeaderText="EventType" class="fs-6 text-muted fw-light" PropertyName="EventType" SortKeySelector="item => item.EventType">
+                @context.EventType
+            </GridColumn>
+            <GridColumn TItem="EventLogs" HeaderText="ItemId" class="fs-6 text-muted fw-light" PropertyName="ItemId" SortKeySelector="item => item.ItemId">
+                @context.ItemId
+            </GridColumn>
+            <GridColumn TItem="EventLogs" HeaderText="ItemName" class="fs-6 text-muted fw-light" PropertyName="ItemName" SortKeySelector="item => item.ItemName">
+                @context.ItemName
+            </GridColumn>
+            <GridColumn TItem="EventLogs" HeaderText="WorkspaceId" class="fs-6 text-muted fw-light" PropertyName="WorkspaceId" SortKeySelector="item => item.WorkspaceId">
+                @context.WorkspaceId
+            </GridColumn>
+            <GridColumn TItem="EventLogs" HeaderText="WorkspaceName" class="fs-6 text-muted fw-light" PropertyName="WorkspaceName" SortKeySelector="item => item.WorkspaceName">
+                @context.WorkspaceName
+            </GridColumn>
+            <GridColumn TItem="EventLogs" HeaderText="ItemKind" class="fs-6 text-muted fw-light" PropertyName="ItemKind" SortKeySelector="item => item.ItemKind">
+                @context.ItemKind
+            </GridColumn>
+        </GridColumns>
+    </Grid>
+    </div>
+}
+
+<br />
+<Button Color="ButtonColor.Danger" @onclick="AggregatedLogs"> Aggregated Logs </Button>
+<Button Color="ButtonColor.Success" @onclick="AnomalyDetection"> Anomaly detection </Button>
+<Button Color="ButtonColor.Secondary" @onclick="TableSummary"> Table Summary </Button>
+
+@if (FabricKqlData.EventLogInsights != null)
+{
+    <div class="dashboard-panel anomaly-chart-panel mt-2 mb-3 w-100">
+        <div class="dashboard-panel-header">
+            <h4>F# Event Insights</h4>
+            <span>Generated by EventLogProcessing.EventLogInsights</span>
+        </div>
+        <div class="anomaly-stats-grid mb-3">
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Trend</div>
+                <div class="anomaly-stat-value">@FabricKqlData.EventLogInsights.Trend</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Last 7 Days</div>
+                <div class="anomaly-stat-value">@FabricKqlData.EventLogInsights.Last7DaysChange</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Anomalies</div>
+                <div class="anomaly-stat-value">@FabricKqlData.EventLogInsights.AnomalySummary</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Data Quality</div>
+                <div class="anomaly-stat-value">@FabricKqlData.EventLogInsights.DataQuality</div>
+            </div>
+        </div>
+        <div class="event-insight-note">
+            @FabricKqlData.EventLogInsights.TrendDescription
+        </div>
+        <div class="event-insight-note">
+            Strongest anomaly: @FabricKqlData.EventLogInsights.StrongestAnomaly
+        </div>
+    </div>
+}
+
+@if (showAggregatedLogs && FabricKqlData.filledLogs != null)
+{
+    <div class="dashboard-panel anomaly-chart-panel mt-2 mb-3 w-100">
+        <div class="dashboard-panel-header">
+            <h4>Aggregated Logs Summary</h4>
+            <span>Daily event counts | Avg: @GetAverageCountText()</span>
+        </div>
+        <div class="anomaly-stats-grid mb-3">
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Days</div>
+                <div class="anomaly-stat-value">@GetDaysCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Total Events</div>
+                <div class="anomaly-stat-value">@GetTotalCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Avg / Day</div>
+                <div class="anomaly-stat-value">@GetAverageCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Median / Day</div>
+                <div class="anomaly-stat-value">@GetMedianCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Min Day</div>
+                <div class="anomaly-stat-value">@GetMinDayText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Max Day</div>
+                <div class="anomaly-stat-value">@GetMaxDayText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Zero Days</div>
+                <div class="anomaly-stat-value">@GetZeroDaysText()</div>
+            </div>
+        </div>
+        <LineChart @ref="aggregatedChart" Height="420" />
+    </div>
+
+}
+
+@if (FabricKqlData.filledLogs != null && FabricKqlData.anomalyPredictions != null)
+{
+
+    @if (!string.IsNullOrWhiteSpace(FabricKqlData.AnomalyDetectionInfo))
+    {
+        <div class="alert alert-warning mt-2">@FabricKqlData.AnomalyDetectionInfo</div>
+    }
+    <div class="dashboard-panel anomaly-chart-panel mt-2 mb-3 w-100">
+        <div class="dashboard-panel-header">
+            <h4>Anomaly Deviation</h4>
+            <span>Difference from daily average | Avg: @GetAverageCountText()</span>
+        </div>
+        <div class="anomaly-stats-grid mb-3">
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Min</div>
+                <div class="anomaly-stat-value">@GetMinCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Max</div>
+                <div class="anomaly-stat-value">@GetMaxCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Avg</div>
+                <div class="anomaly-stat-value">@GetAverageCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Median</div>
+                <div class="anomaly-stat-value">@GetMedianCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Total Events</div>
+                <div class="anomaly-stat-value">@GetTotalCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Anomalies</div>
+                <div class="anomaly-stat-value">@GetAnomalyCountText()</div>
+            </div>
+            <div class="anomaly-stat-card">
+                <div class="anomaly-stat-label">Anomaly Rate</div>
+                <div class="anomaly-stat-value">@GetAnomalyRateText()</div>
+            </div>
+        </div>
+        <BarChart @ref="anomalyChart" Height="520" />
+    </div>
+
+}
+
+@if (showTableSummary && FabricKqlData.filledLogs != null)
+{
+    <div class="alert alert-info mt-3 mb-2">
+        Default view: Anomaly = Yes.
+    </div>
+    <div class="table-scroll-x mt-3">
+        <Grid TItem="TableSummaryRow"
+        Class="table table-hover table-bordered table-striped"
+        DataProvider="tableSummaryRowsList"
+        AllowFiltering="true"
+        AllowPaging="true"
+        PageSize="50"
+        AllowSorting="true"
+        Responsive="true">
+            <GridColumns>
+                <GridColumn TItem="TableSummaryRow" HeaderText="Date" class="fs-6 text-muted fw-light" PropertyName="EventTime" SortKeySelector="item => item.EventTime">
+                    @context.EventTime
+                </GridColumn>
+                <GridColumn TItem="TableSummaryRow" HeaderText="Count" class="fs-6 text-muted fw-light" PropertyName="Cnt" SortKeySelector="item => item.Cnt">
+                    @context.Cnt
+                </GridColumn>
+                <GridColumn TItem="TableSummaryRow" HeaderText="Delta vs Avg" class="fs-6 text-muted fw-light" PropertyName="DeltaVsAverage" SortKeySelector="item => item.DeltaVsAverage">
+                    @context.DeltaVsAverage
+                </GridColumn>
+                <GridColumn TItem="TableSummaryRow" HeaderText="Anomaly" class="fs-6 text-muted fw-light" PropertyName="Anomaly" SortKeySelector="item => item.Anomaly">
+                    @context.Anomaly
+                </GridColumn>
+            </GridColumns>
+        </Grid>
+    </div>
+}
+@code {
+
+    private string? queryText = @"['ms-fabric-logs']
+| take 100000 
+| project Id=id, EventTime=['time'], EventType=['type'], ItemId=data['itemId'], ItemName=data['itemName'], WorkspaceId=data['workspaceId'], WorkspaceName=data['workspaceName'], ItemKind=data['itemKind'] 
+| filter EventTime >= ago(500d)";
+    private LineChart aggregatedChart = default!;
+    private BarChart anomalyChart = default!;
+    private bool showAggregatedLogs;
+    private bool showTableSummary;
+    private bool aggregatedChartNeedsRender;
+    private bool anomalyChartNeedsRender;
+    private int queryVersion;
+    private bool showAiMode;
+    private bool isGeneratingAi;
+    private bool isQueryRunning;
+    private string? aiPrompt;
+    private string? aiGeneratedQuery;
+    private string? aiStatus;
+    private string aiStatusClass = "alert-secondary";
+    private string? queryStatus;
+    private string queryStatusClass = "alert-secondary";
+
+    private async Task SendQuery()
+    {
+        if (string.IsNullOrWhiteSpace(queryText))
+        {
+            queryStatus = "Enter a KQL query before sending.";
+            queryStatusClass = "alert-warning";
+            return;
+        }
+
+        isQueryRunning = true;
+        queryStatus = null;
+        FabricKqlData.queryResult = null;
+        StateHasChanged();
+
+        try
+        {
+            await FabricKqlData.GetEventLogs(false, queryText);
+            FabricKqlData.filledLogs = null;
+            FabricKqlData.anomalyPredictions = null;
+            showAggregatedLogs = false;
+            showTableSummary = false;
+            aggregatedChartNeedsRender = false;
+            anomalyChartNeedsRender = false;
+            queryVersion++;
+            queryStatus = "Event Log data loaded.";
+            queryStatusClass = "alert-success";
+        }
+        catch (Exception ex)
+        {
+            queryStatus = $"Could not load Event Log data: {ex.Message}";
+            queryStatusClass = "alert-danger";
+        }
+        finally
+        {
+            isQueryRunning = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ToggleAiMode()
+    {
+        showAiMode = !showAiMode;
+    }
+
+    private async Task GenerateKqlWithAi()
+    {
+        if (string.IsNullOrWhiteSpace(aiPrompt))
+        {
+            aiStatus = "Enter a prompt first.";
+            aiStatusClass = "alert-warning";
+            return;
+        }
+
+        isGeneratingAi = true;
+        aiStatus = null;
+        aiStatusClass = "alert-secondary";
+        StateHasChanged();
+
+        try
+        {
+            aiGeneratedQuery = await AiKqlService.GenerateKqlAsync(aiPrompt.Trim());
+            aiStatus = "KQL generated. Review and click Apply.";
+            aiStatusClass = "alert-success";
+        }
+        catch (Exception ex)
+        {
+            aiStatus = GetFriendlyAiErrorMessage(ex);
+            aiStatusClass = "alert-warning";
+        }
+        finally
+        {
+            isGeneratingAi = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ApplyGeneratedKql()
+    {
+        if (string.IsNullOrWhiteSpace(aiGeneratedQuery))
+        {
+            aiStatus = "No generated query to apply.";
+            aiStatusClass = "alert-warning";
+            return;
+        }
+
+        queryText = aiGeneratedQuery;
+        aiStatus = "Generated KQL applied to KQL Query.";
+        aiStatusClass = "alert-success";
+    }
+
+    private static string GetFriendlyAiErrorMessage(Exception exception)
+    {
+        var message = exception.Message;
+        if (message.Contains("Connection refused", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("LM Studio request failed for all endpoints", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The local LLM service is not available. The app tried to contact LM Studio, but no server responded. Start the LM Studio local server or check the LmStudio:BaseUrl setting, then try Generate KQL again.";
+        }
+
+        return "The app could not generate KQL right now. Check the local LLM service and try again.";
+    }
+
+    private async Task AggregatedLogs()
+    {
+        await FabricKqlData.EventLogAggCount();
+        showAggregatedLogs = true;
+        aggregatedChartNeedsRender = true;
+        StateHasChanged();
+    }
+
+    private async Task AnomalyDetection()
+    {
+        await FabricKqlData.EventLogsAnomalyDetection();
+        anomalyChartNeedsRender = true;
+        StateHasChanged();
+    }
+
+    private async Task TableSummary()
+    {
+        if (FabricKqlData.filledLogs == null)
+        {
+            await FabricKqlData.EventLogAggCount();
+        }
+
+        showTableSummary = true;
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (aggregatedChartNeedsRender && FabricKqlData.filledLogs != null)
+        {
+            await aggregatedChart.InitializeAsync(CreateAggregatedChartData(), CreateAggregatedChartOptions());
+            aggregatedChartNeedsRender = false;
+        }
+
+        if (anomalyChartNeedsRender &&
+            FabricKqlData.filledLogs != null &&
+            FabricKqlData.anomalyPredictions != null &&
+            FabricKqlData.filledLogs.Count == FabricKqlData.anomalyPredictions.Count)
+        {
+            await anomalyChart.InitializeAsync(CreateAnomalyChartData(), CreateAnomalyChartOptions());
+            anomalyChartNeedsRender = false;
+        }
+
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task<GridDataProviderResult<EventLogs>> eventsList(GridDataProviderRequest<EventLogs> request)
+    {
+        if (FabricKqlData.queryResult == null)
+        {
+            throw new ArgumentNullException(nameof(request));
+        };
+        return await Task.FromResult(request!.ApplyTo(FabricKqlData.queryResult));
+    }
+
+    private async Task<GridDataProviderResult<TableSummaryRow>> tableSummaryRowsList(GridDataProviderRequest<TableSummaryRow> request)
+    {
+        var rows = GetTableSummaryRows()
+            .Where(row => row.Anomaly == "Yes");
+        return await Task.FromResult(request.ApplyTo(rows));
+    }
+
+    private string GetQueryTakeText()
+    {
+        var match = Regex.Match(queryText ?? string.Empty, @"\btake\s+(\d+)\b", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : "-";
+    }
+
+    private string GetQueryTimeWindowText()
+    {
+        var match = Regex.Match(queryText ?? string.Empty, @"ago\(([^)]+)\)", RegexOptions.IgnoreCase);
+        return match.Success ? $"last {match.Groups[1].Value.Trim()}" : "-";
+    }
+
+    private string GetQueryPipelineStepsText()
+    {
+        var steps = (queryText ?? string.Empty)
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Length;
+
+        return steps == 0 ? "-" : steps.ToString();
+    }
+
+    private string GetProjectedFieldsCountText()
+    {
+        var fields = GetProjectedFields();
+        return fields.Count == 0 ? "-" : fields.Count.ToString();
+    }
+
+    private string GetProjectedFieldsText()
+    {
+        var fields = GetProjectedFields();
+        return fields.Count == 0 ? "-" : string.Join(", ", fields);
+    }
+
+    private string GetQueryFilterText()
+    {
+        var matches = Regex.Matches(
+            queryText ?? string.Empty,
+            @"\|\s*filter\s+(.+?)(?=\r?\n\s*\||\|$|$)",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        if (matches.Count == 0)
+        {
+            return "-";
+        }
+
+        var filter = Regex.Replace(matches[^1].Groups[1].Value, @"\s+", " ").Trim();
+        return filter.Length > 180 ? $"{filter[..180]}..." : filter;
+    }
+
+    private List<string> GetProjectedFields()
+    {
+        var match = Regex.Match(
+            queryText ?? string.Empty,
+            @"\|\s*project\s+(.+?)(?=\r?\n\s*\||\|$|$)",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        if (!match.Success)
+        {
+            return new List<string>();
+        }
+
+        return match.Groups[1].Value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(field => field.Split('=', 2, StringSplitOptions.TrimEntries)[0])
+            .Where(field => !string.IsNullOrWhiteSpace(field))
+            .ToList();
+    }
+
+    private ChartData CreateAggregatedChartData()
+    {
+        var labels = FabricKqlData.filledLogs!
+            .Select(e => e.EventTime?.ToString("yyyy-MM-dd") ?? "-")
+            .ToList();
+        var values = FabricKqlData.filledLogs!
+            .Select(e => (double?)e.Cnt)
+            .ToList();
+        var average = values.Where(e => e.HasValue).Select(e => e!.Value).DefaultIfEmpty(0).Average();
+        var averageLine = values.Select(_ => (double?)average).ToList();
+
+        return new ChartData
+        {
+            Labels = labels,
+            Datasets = new List<IChartDataset>
+            {
+                new LineChartDataset
+                {
+                    Label = "Daily count",
+                    Data = values,
+                    BorderColor = "#ef8354",
+                    BackgroundColor = "rgba(239,131,84,0.18)",
+                    Fill = true,
+                    Tension = 0.25
+                },
+                new LineChartDataset
+                {
+                    Label = "Average",
+                    Data = averageLine,
+                    BorderColor = "#38bdf8",
+                    BackgroundColor = "rgba(56,189,248,0.10)",
+                    Fill = false,
+                    Tension = 0,
+                    PointRadius = new List<double> { 0 },
+                    BorderDash = new List<double> { 6, 6 },
+                    BorderWidth = 1
+                }
+            }
+        };
+    }
+
+    private static LineChartOptions CreateAggregatedChartOptions()
+    {
+        var options = new LineChartOptions
+        {
+            Responsive = true,
+            Interaction = new Interaction { Mode = InteractionMode.Index, Intersect = false }
+        };
+
+        options.Scales.X!.Title = new ChartAxesTitle { Text = "Date", Display = true };
+        options.Scales.Y!.Title = new ChartAxesTitle { Text = "Count", Display = true };
+        options.Plugins.Legend.Position = "top";
+        return options;
+    }
+
+    private ChartData CreateAnomalyChartData()
+    {
+        var labels = FabricKqlData.filledLogs!
+            .Select(e => e.EventTime?.ToString("yyyy-MM-dd") ?? "-")
+            .ToList();
+        var average = FabricKqlData.filledLogs!.Select(e => (double)e.Cnt).DefaultIfEmpty(0).Average();
+        var deviations = FabricKqlData.filledLogs!
+            .Select(e => (double?)(e.Cnt - average))
+            .ToList();
+        var anomalyFlags = FabricKqlData.filledLogs!
+            .Select((e, i) =>
+            {
+                var prediction = FabricKqlData.anomalyPredictions![i];
+                return prediction?.Prediction?.Length > 0 && prediction.Prediction[0] == 1;
+            })
+            .ToList();
+
+        var datasets = new List<IChartDataset>
+        {
+            new BarChartDataset
+            {
+                Label = "Delta vs average",
+                Data = deviations,
+                BackgroundColor = deviations
+                    .Select((value, i) => anomalyFlags[i]
+                        ? "#dc2626"
+                        : value >= 0 ? "#f4a261" : "#38bdf8")
+                    .ToList(),
+                BorderColor = deviations
+                    .Select((value, i) => anomalyFlags[i]
+                        ? "#991b1b"
+                        : value >= 0 ? "#c96f2d" : "#0ea5e9")
+                    .ToList(),
+                BorderWidth = new List<double> { 1 }
+            }
+        };
+
+        return new ChartData
+        {
+            Labels = labels,
+            Datasets = datasets
+        };
+    }
+
+    private static BarChartOptions CreateAnomalyChartOptions()
+    {
+        var options = new BarChartOptions
+        {
+            Responsive = true,
+            Interaction = new Interaction { Mode = InteractionMode.Index },
+            IndexAxis = "x"
+        };
+
+        options.Scales.X!.Title = new ChartAxesTitle { Text = "Date", Display = true };
+        options.Scales.Y!.Title = new ChartAxesTitle { Text = "Delta vs average count", Display = true };
+        options.Plugins.Legend.Position = "top";
+        return options;
+    }
+
+    private string GetAverageCountText()
+    {
+        if (FabricKqlData.filledLogs == null || FabricKqlData.filledLogs.Count == 0)
+        {
+            return "-";
+        }
+
+        var average = FabricKqlData.filledLogs.Average(e => e.Cnt);
+        return average.ToString("0.##");
+    }
+
+    private string GetDaysCountText()
+    {
+        if (FabricKqlData.filledLogs == null)
+        {
+            return "-";
+        }
+
+        return FabricKqlData.filledLogs.Count.ToString();
+    }
+
+    private string GetMinCountText()
+    {
+        if (FabricKqlData.filledLogs == null || FabricKqlData.filledLogs.Count == 0)
+        {
+            return "-";
+        }
+
+        return FabricKqlData.filledLogs.Min(e => e.Cnt).ToString("0.##");
+    }
+
+    private string GetMaxCountText()
+    {
+        if (FabricKqlData.filledLogs == null || FabricKqlData.filledLogs.Count == 0)
+        {
+            return "-";
+        }
+
+        return FabricKqlData.filledLogs.Max(e => e.Cnt).ToString("0.##");
+    }
+
+    private string GetMedianCountText()
+    {
+        if (FabricKqlData.filledLogs == null || FabricKqlData.filledLogs.Count == 0)
+        {
+            return "-";
+        }
+
+        var values = FabricKqlData.filledLogs.Select(e => (double)e.Cnt).OrderBy(v => v).ToList();
+        var middle = values.Count / 2;
+        var median = values.Count % 2 == 0
+            ? (values[middle - 1] + values[middle]) / 2.0
+            : values[middle];
+
+        return median.ToString("0.##");
+    }
+
+    private string GetTotalCountText()
+    {
+        if (FabricKqlData.filledLogs == null || FabricKqlData.filledLogs.Count == 0)
+        {
+            return "-";
+        }
+
+        var total = FabricKqlData.filledLogs.Sum(e => e.Cnt);
+        return total.ToString("0");
+    }
+
+    private string GetZeroDaysText()
+    {
+        if (FabricKqlData.filledLogs == null || FabricKqlData.filledLogs.Count == 0)
+        {
+            return "-";
+        }
+
+        return FabricKqlData.filledLogs.Count(e => e.Cnt == 0).ToString();
+    }
+
+    private string GetMinDayText()
+    {
+        if (FabricKqlData.filledLogs == null || FabricKqlData.filledLogs.Count == 0)
+        {
+            return "-";
+        }
+
+        var item = FabricKqlData.filledLogs.OrderBy(e => e.Cnt).First();
+        return $"{item.EventTime?.ToString("yyyy-MM-dd") ?? "-"} ({item.Cnt})";
+    }
+
+    private string GetMaxDayText()
+    {
+        if (FabricKqlData.filledLogs == null || FabricKqlData.filledLogs.Count == 0)
+        {
+            return "-";
+        }
+
+        var item = FabricKqlData.filledLogs.OrderByDescending(e => e.Cnt).First();
+        return $"{item.EventTime?.ToString("yyyy-MM-dd") ?? "-"} ({item.Cnt})";
+    }
+
+    private string GetAnomalyCountText()
+    {
+        if (FabricKqlData.anomalyPredictions == null || FabricKqlData.anomalyPredictions.Count == 0)
+        {
+            return "-";
+        }
+
+        var count = FabricKqlData.anomalyPredictions.Count(p => p?.Prediction?.Length > 0 && p.Prediction[0] == 1);
+        return count.ToString();
+    }
+
+    private string GetAnomalyRateText()
+    {
+        if (FabricKqlData.anomalyPredictions == null || FabricKqlData.anomalyPredictions.Count == 0)
+        {
+            return "-";
+        }
+
+        var total = FabricKqlData.anomalyPredictions.Count;
+        var anomalies = FabricKqlData.anomalyPredictions.Count(p => p?.Prediction?.Length > 0 && p.Prediction[0] == 1);
+        var rate = total == 0 ? 0 : (double)anomalies / total * 100.0;
+        return $"{rate:0.##}%";
+    }
+
+    private IEnumerable<TableSummaryRow> GetTableSummaryRows()
+    {
+        if (FabricKqlData.filledLogs == null)
+        {
+            return Enumerable.Empty<TableSummaryRow>();
+        }
+
+        var average = FabricKqlData.filledLogs.Count == 0
+            ? 0
+            : FabricKqlData.filledLogs.Average(e => e.Cnt);
+
+        return FabricKqlData.filledLogs.Select((e, i) =>
+        {
+            var delta = e.Cnt - average;
+            var anomaly = "-";
+            if (FabricKqlData.anomalyPredictions != null && i < FabricKqlData.anomalyPredictions.Count)
+            {
+                var prediction = FabricKqlData.anomalyPredictions[i];
+                var isAnomaly = prediction?.Prediction?.Length > 0 && prediction.Prediction[0] == 1;
+                anomaly = isAnomaly ? "Yes" : "No";
+            }
+
+            return new TableSummaryRow
+            {
+                EventTime = e.EventTime?.ToString("yyyy-MM-dd") ?? "-",
+                Cnt = e.Cnt,
+                DeltaVsAverage = delta.ToString("+0.##;-0.##;0"),
+                Anomaly = anomaly
+            };
+        });
+    }
+
+    private sealed class TableSummaryRow
+    {
+        public string EventTime { get; set; } = string.Empty;
+        public int Cnt { get; set; }
+        public string DeltaVsAverage { get; set; } = string.Empty;
+        public string Anomaly { get; set; } = string.Empty;
+    }
+}

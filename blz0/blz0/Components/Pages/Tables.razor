@@ -1,0 +1,1131 @@
+﻿@using Data
+@inject GlobalData GlobalData
+@using Operations
+@inject FabricApiData FabricApiData
+@inject FabricSqlData FabricSqlData
+@using System.Reflection
+@using SharedServices
+@inject SharedFabricAuth SharedFabricAuth
+@using Models
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager Navigation
+@using BlazorBootstrap
+@using System.Security.Authentication
+@using blz0.Authorization
+@using Microsoft.Identity.Client
+@using Microsoft.Identity.Web
+@implements IAsyncDisposable
+@inject IWebHostEnvironment HostEnvironment
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IConfiguration Configuration
+
+
+<Toasts class="p-3" Messages="messages" AutoHide="true" Delay="6000" Placement="ToastsPlacement.TopRight" />
+
+
+
+<div class="cache-toolbar">
+    <div class="cache-status">
+        @CacheStatusText
+    </div>
+    <div class="active-filter btn-group" role="group" aria-label="Record status filter">
+        <button type="button" class='@GetActiveFilterButtonClass("active")' @onclick="SetActiveFilterActiveAsync">Active</button>
+        <button type="button" class='@GetActiveFilterButtonClass("inactive")' @onclick="SetActiveFilterInactiveAsync">Inactive</button>
+        <button type="button" class='@GetActiveFilterButtonClass("all")' @onclick="SetActiveFilterAllAsync">All</button>
+    </div>
+    <button class="btn btn-warning" @onclick="RefreshDataAsync" disabled="@RefreshButtonDisabled">@RefreshButtonText</button>
+    @if (StatusInfo)
+    {
+        <span class="spinner-border spinner-border-sm text-warning" role="status"></span>
+    }
+    @if (!string.IsNullOrWhiteSpace(refreshErrorText))
+    {
+        <span class="text-danger fw-semibold">@refreshErrorText</span>
+    }
+</div>
+
+<div @key="gridRenderVersion" class="inventory-table-wrap">
+    @switch (FabricObjectType)
+    {
+        case "capacitiesList":
+            <CapacityInventoryTable Items="FabricSqlData.capacitiesList" />
+            break;
+        case "workspacesList":
+            <WorkspaceInventoryTable Items="FabricSqlData.workspacesList" />
+            break;
+        case "datasetsList":
+            <DatasetInventoryTable Items="FabricSqlData.datasetsList"
+                                   DetailsLink="@GetDatasetDetailsLink"
+                                   RefreshSummary="@RenderDatasetRefreshSummary" />
+            break;
+        case "reportsList":
+            <ReportInventoryTable Items="FabricSqlData.reportsList"
+                                  DatasetLink="@GetDatasetLink" />
+            break;
+        case "lakehousesList":
+            <LakehouseInventoryTable Items="FabricSqlData.lakehousesList" />
+            break;
+        case "warehousesList":
+            <WarehouseInventoryTable Items="FabricSqlData.warehousesList" />
+            break;
+    }
+</div>
+
+@code {
+    [CascadingParameter(Name = "FabricObjectType")]
+    public string? FabricObjectType { get; set; }
+    [CascadingParameter(Name = "workspaceIdNav")]
+    public string? workspaceIdNav { get; set; }
+    [CascadingParameter(Name = "capacityIdNav")]
+    public string? capacityIdNav { get; set; }
+    public bool StatusInfo { get; set; }
+    private HubConnection? hubConnection;
+    List<ToastMessage> messages = new List<ToastMessage>();
+    private bool isLoadingData;
+    private bool? isPowerBiInventoryAdmin;
+    private string activeFilter = "active";
+    private int gridRenderVersion;
+    private List<string>? cachedAccessibleCapacityIds;
+    private List<string>? cachedAccessibleWorkspaceIds;
+    private DateTime? cachedAccessFetchedAtUtc;
+    private TimeSpan AccessCacheTtl => TimeSpan.FromMinutes(
+        int.TryParse(Configuration["Authorization:UserAccessCacheTtlMinutes"], out var minutes) && minutes > 0
+            ? minutes
+            : 60);
+    private string? refreshErrorText;
+    private static readonly TimeSpan DatasetRefreshCacheTtl = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan DatasetInProgressPollInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan DatasetInProgressMaxAge = TimeSpan.FromMinutes(5);
+    private PeriodicTimer? cacheStatusTimer;
+    private CancellationTokenSource? cacheStatusTimerCancellation;
+    private bool pendingPowerBiTokenChallenge;
+    private readonly HashSet<string> refreshingDatasetKeys = new(StringComparer.OrdinalIgnoreCase);
+    private bool RefreshButtonDisabled => StatusInfo;
+    private string RefreshButtonText => "Refresh from Fabric";
+    private string CacheStatusText
+    {
+        get
+        {
+            if (FabricSqlData.currentCacheState?.RefreshedAtUtc == null)
+            {
+                return "Cache has not been refreshed yet";
+            }
+
+            var elapsed = DateTime.UtcNow - FabricSqlData.currentCacheState.RefreshedAtUtc;
+            return $"Updated {FormatElapsed(elapsed)} ago | {FabricSqlData.currentCacheState.RowCount} rows";
+        }
+    }
+
+    
+    private void AddToastMessage(ToastType toastType)
+    {
+        messages.Add(new ToastMessage
+            {
+                Type = toastType,
+                Title = "Blazor Bootstrap",
+                HelpText = $"{DateTime.Now}",
+                Message = $"Records have been added: {DateTime.Now}",
+            });
+    }
+
+    // private ToastMessage CreateToastMessage(ToastType toastType)
+    // => new ToastMessage
+    //     {
+    //         Type = toastType,
+    //         Title = "Blazor Bootstrap",
+    //         HelpText = $"{DateTime.Now}",
+    //         Message = $"Records have been added: {DateTime.Now}",
+    //     };
+
+    protected override async Task OnInitializedAsync()
+    {
+        SharedFabricAuth.OnChange += OnSharedAuthChanged;
+        cacheStatusTimerCancellation = new CancellationTokenSource();
+        cacheStatusTimer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        _ = RefreshCacheStatusClockAsync(cacheStatusTimerCancellation.Token);
+
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/notificationHub"), options =>
+            {
+                if (HostEnvironment.IsDevelopment())
+                {
+                    options.HttpMessageHandlerFactory = handler =>
+                    {
+                        if (handler is HttpClientHandler clientHandler)
+                        {
+                            clientHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+                        }
+
+                        return handler;
+                    };
+                }
+            })
+            .Build();
+
+        hubConnection.On<string>("ReceiveNotification", async (message) =>
+        {
+            AddToastMessage(ToastType.Info);
+            await InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await hubConnection.StartAsync();
+        }
+        catch (Exception ex) when (
+            ex is InvalidDataException ||
+            ex is HttpRequestException ||
+            ex is AuthenticationException)
+        {
+            // Under external auth providers in dev, hub negotiation can return HTML/login content.
+            // We keep the page functional and just skip real-time toast notifications.
+            await hubConnection.DisposeAsync();
+            hubConnection = null;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        SharedFabricAuth.OnChange -= OnSharedAuthChanged;
+        cacheStatusTimerCancellation?.Cancel();
+        cacheStatusTimer?.Dispose();
+        cacheStatusTimerCancellation?.Dispose();
+
+        if (hubConnection != null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+
+    private async Task RefreshCacheStatusClockAsync(CancellationToken cancellationToken)
+    {
+        if (cacheStatusTimer == null)
+        {
+            return;
+        }
+
+        try
+        {
+            while (await cacheStatusTimer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (FabricSqlData.currentCacheState != null)
+                {
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!pendingPowerBiTokenChallenge)
+        {
+            return;
+        }
+
+        pendingPowerBiTokenChallenge = false;
+        var returnUrl = Uri.EscapeDataString(Navigation.ToBaseRelativePath(Navigation.Uri));
+        Navigation.NavigateTo($"/MicrosoftIdentity/Account/SignIn?redirectUri=/{returnUrl}", forceLoad: true);
+    }
+
+    private async Task OnSharedAuthChanged()
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadDataAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadDataAsync()
+    {
+        await LoadDataAsync(forceReload: false);
+    }
+
+    private async Task LoadDataAsync(bool forceReload)
+    {
+        if (isLoadingData)
+        {
+            return;
+        }
+
+        isLoadingData = true;
+
+        try
+        {
+            switch (FabricObjectType)
+            {
+                case "capacitiesList":
+                    await LoadCapacitiesAsync(forceReload);
+                    break;
+                case "workspacesList":
+                    await LoadWorkspacesAsync(forceReload);
+                    break;
+                case "datasetsList":
+                    await LoadDatasetsAsync(forceReload);
+                    break;
+                case "reportsList":
+                    await LoadReportsAsync(forceReload);
+                    break;
+                case "lakehousesList":
+                    await LoadLakehousesAsync(forceReload);
+                    break;
+                case "warehousesList":
+                    await LoadWarehousesAsync(forceReload);
+                    break;
+                default:
+                    break;
+            }
+
+            await FabricSqlData.GetCacheStateAsync(FabricObjectType ?? string.Empty, GetCurrentScopeId());
+            gridRenderVersion++;
+        }
+        catch (Exception ex) when (IsUiRequiredTokenException(ex))
+        {
+            SchedulePowerBiTokenChallenge();
+        }
+        finally
+        {
+            isLoadingData = false;
+        }
+    }
+
+    private async Task<HttpClient?> GetReadyFabricClientAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        await SharedFabricAuth.FabricAuth.FabricAuthAutoAsync(user);
+        await SharedFabricAuth.NotifyStateChangedAsync();
+        await FabricSqlData.UpsertCurrentUserMapAsync();
+        return SharedFabricAuth.FabricAuth.tokenAuto;
+    }
+
+    private async Task<HttpClient?> GetReadyFabricRestClientAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        var client = await SharedFabricAuth.FabricAuth.GetFabricApiClientAsync(user);
+        await FabricSqlData.UpsertCurrentUserMapAsync();
+        return client;
+    }
+
+    private async Task LoadCapacitiesAsync(bool forceReload)
+    {
+        var allowedCapacityIds = await IsPowerBiInventoryAdminAsync()
+            ? null
+            : await GetAccessibleCapacityIdsAsync();
+        if (forceReload || FabricSqlData.capacitiesList == null)
+        {
+            await FabricSqlData.GetCapacitiesSqlAsync(activeFilter, allowedCapacityIds);
+        }
+        else
+        {
+            await FabricSqlData.GetCapacitiesSqlAsync(activeFilter, allowedCapacityIds);
+        }
+    }
+
+    private async Task LoadWorkspacesAsync(bool forceReload)
+    {
+        var allowedWorkspaceIds = await IsPowerBiInventoryAdminAsync()
+            ? null
+            : await GetAccessibleWorkspaceIdsAsync();
+        if (forceReload || FabricSqlData.workspacesList == null || GlobalData.WorkspaceIdState != capacityIdNav)
+        {
+            GlobalData.WorkspaceIdState = capacityIdNav ?? string.Empty;
+            await FabricSqlData.GetWorkspacesSqlAsync(capacityIdNav, activeFilter, allowedWorkspaceIds);
+        }
+        else
+        {
+            await FabricSqlData.GetWorkspacesSqlAsync(capacityIdNav, activeFilter, allowedWorkspaceIds);
+        }
+    }
+
+    private async Task LoadDatasetsAsync(bool forceReload)
+    {
+        var isAdmin = await IsPowerBiInventoryAdminAsync();
+        var allowedWorkspaceIds = isAdmin
+            ? null
+            : await GetAccessibleWorkspaceIdsAsync();
+        if (forceReload || FabricSqlData.datasetsList == null || GlobalData.DatasetIdState != workspaceIdNav)
+        {
+            GlobalData.DatasetIdState = workspaceIdNav ?? string.Empty;
+            await FabricSqlData.GetDatasetsSqlAsync(workspaceIdNav, activeFilter, null, allowedWorkspaceIds);
+        }
+        else
+        {
+            await FabricSqlData.GetDatasetsSqlAsync(workspaceIdNav, activeFilter, null, allowedWorkspaceIds);
+        }
+    }
+
+    private async Task LoadReportsAsync(bool forceReload)
+    {
+        var isAdmin = await IsPowerBiInventoryAdminAsync();
+        var allowedWorkspaceIds = isAdmin
+            ? null
+            : await GetAccessibleWorkspaceIdsAsync();
+        if (forceReload || FabricSqlData.reportsList == null || GlobalData.WorkspaceIdState != workspaceIdNav)
+        {
+            GlobalData.WorkspaceIdState = workspaceIdNav ?? string.Empty;
+            await FabricSqlData.GetReportsSqlAsync(workspaceIdNav, activeFilter, null, allowedWorkspaceIds);
+        }
+        else
+        {
+            await FabricSqlData.GetReportsSqlAsync(workspaceIdNav, activeFilter, null, allowedWorkspaceIds);
+        }
+    }
+
+    private async Task LoadLakehousesAsync(bool forceReload)
+    {
+        var isAdmin = await IsPowerBiInventoryAdminAsync();
+        var allowedWorkspaceIds = isAdmin
+            ? null
+            : await GetAccessibleWorkspaceIdsAsync();
+        if (forceReload || FabricSqlData.lakehousesList == null || GlobalData.WorkspaceIdState != workspaceIdNav)
+        {
+            GlobalData.WorkspaceIdState = workspaceIdNav ?? string.Empty;
+            await FabricSqlData.GetLakehousesSqlAsync(workspaceIdNav, activeFilter, allowedWorkspaceIds);
+        }
+        else
+        {
+            await FabricSqlData.GetLakehousesSqlAsync(workspaceIdNav, activeFilter, allowedWorkspaceIds);
+        }
+    }
+
+    private async Task LoadWarehousesAsync(bool forceReload)
+    {
+        var isAdmin = await IsPowerBiInventoryAdminAsync();
+        var allowedWorkspaceIds = isAdmin
+            ? null
+            : await GetAccessibleWorkspaceIdsAsync();
+        if (forceReload || FabricSqlData.warehousesList == null || GlobalData.WorkspaceIdState != workspaceIdNav)
+        {
+            GlobalData.WorkspaceIdState = workspaceIdNav ?? string.Empty;
+            await FabricSqlData.GetWarehousesSqlAsync(workspaceIdNav, activeFilter, allowedWorkspaceIds);
+        }
+        else
+        {
+            await FabricSqlData.GetWarehousesSqlAsync(workspaceIdNav, activeFilter, allowedWorkspaceIds);
+        }
+    }
+
+    private async Task SetActiveFilterAsync(string filter)
+    {
+        if (activeFilter == filter)
+        {
+            return;
+        }
+
+        activeFilter = filter;
+        await LoadDataAsync(forceReload: true);
+        gridRenderVersion++;
+        StateHasChanged();
+    }
+
+    private Task SetActiveFilterActiveAsync() => SetActiveFilterAsync("active");
+
+    private Task SetActiveFilterInactiveAsync() => SetActiveFilterAsync("inactive");
+
+    private Task SetActiveFilterAllAsync() => SetActiveFilterAsync("all");
+
+    private string GetActiveFilterButtonClass(string filter)
+    {
+        return activeFilter == filter ? "btn btn-warning active" : "btn btn-outline-secondary";
+    }
+
+    public async Task RefreshDataAsync()
+    {
+        StatusInfo = true;
+        refreshErrorText = null;
+        StateHasChanged();
+
+        try
+        {
+            await RefreshFromFabricAsync();
+        }
+        catch (Exception ex) when (IsUiRequiredTokenException(ex))
+        {
+            SchedulePowerBiTokenChallenge();
+        }
+        catch (Exception ex)
+        {
+            refreshErrorText = ex.Message;
+        }
+        finally
+        {
+            StatusInfo = false;
+            gridRenderVersion++;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshFromFabricAsync()
+    {
+        InvalidateAccessCache();
+        if (FabricObjectType == "lakehousesList")
+        {
+            await RefreshLakehousesFromFabricAsync();
+        }
+        else if (FabricObjectType == "warehousesList")
+        {
+            await RefreshWarehousesFromFabricAsync();
+        }
+        else
+        {
+            var fabricClient = await GetReadyFabricClientAsync();
+            if (fabricClient == null)
+            {
+                return;
+            }
+
+            switch (FabricObjectType)
+            {
+                case "workspacesList":
+                    await FabricApiData.GetWorkspacesApiAsync(fabricClient, capacityIdNav);
+                    await FabricSqlData.AddWorkspaceToSqlAsync(FabricApiData.workspacesList ?? [], capacityIdNav);
+                    break;
+                case "datasetsList":
+                    await RefreshDatasetsFromFabricAsync(fabricClient);
+                    break;
+                case "capacitiesList":
+                    await FabricApiData.GetCapacitiesApiAsync(fabricClient);
+                    await FabricSqlData.AddCapacityToSqlAsync(FabricApiData.capacitiesList ?? []);
+                    break;
+                case "reportsList":
+                    await RefreshReportsFromFabricAsync(fabricClient);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        await LoadDataAsync(forceReload: true);
+    }
+
+    private async Task RefreshDatasetsFromFabricAsync(HttpClient fabricClient)
+    {
+        if (!string.IsNullOrWhiteSpace(workspaceIdNav))
+        {
+            await FabricApiData.GetDatasetsApiAsync(fabricClient, workspaceIdNav);
+            await FabricSqlData.AddDatasetToSqlAsync(FabricApiData.datasetsList ?? [], workspaceIdNav);
+            return;
+        }
+
+        var workspaceIds = await GetAccessibleWorkspaceIdsAsync();
+        var totalRows = 0;
+
+        foreach (var workspaceId in workspaceIds)
+        {
+            await FabricApiData.GetDatasetsApiAsync(fabricClient, workspaceId);
+            var datasets = (FabricApiData.datasetsList ?? []).ToList();
+            totalRows += datasets.Count;
+            await FabricSqlData.AddDatasetToSqlAsync(datasets, workspaceId, notify: false);
+        }
+
+        await FabricSqlData.SetCacheRefreshedAsync("datasetsList", null, totalRows);
+        await FabricSqlData.SendRefreshNotificationAsync("Datasets cache refreshed.");
+    }
+
+    private async Task RefreshReportsFromFabricAsync(HttpClient fabricClient)
+    {
+        if (!string.IsNullOrWhiteSpace(workspaceIdNav))
+        {
+            await FabricApiData.GetReportsApiAsync(fabricClient, workspaceIdNav);
+            await FabricSqlData.AddReportToSqlAsync(FabricApiData.reportsList ?? [], workspaceIdNav);
+            return;
+        }
+
+        var workspaceIds = await GetAccessibleWorkspaceIdsAsync();
+        var totalRows = 0;
+
+        foreach (var workspaceId in workspaceIds)
+        {
+            await FabricApiData.GetReportsApiAsync(fabricClient, workspaceId);
+            var reports = (FabricApiData.reportsList ?? []).ToList();
+            totalRows += reports.Count;
+            await FabricSqlData.AddReportToSqlAsync(reports, workspaceId, notify: false);
+        }
+
+        await FabricSqlData.SetCacheRefreshedAsync("reportsList", null, totalRows);
+        await FabricSqlData.SendRefreshNotificationAsync("Reports cache refreshed.");
+    }
+
+    private async Task RefreshLakehousesFromFabricAsync()
+    {
+        var fabricRestClient = await GetReadyFabricRestClientAsync();
+        if (fabricRestClient == null)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(workspaceIdNav))
+        {
+            var lakehouses = await TryGetLakehousesForWorkspaceAsync(fabricRestClient, workspaceIdNav);
+            await FabricSqlData.AddLakehouseToSqlAsync(lakehouses, workspaceIdNav);
+            return;
+        }
+
+        var workspaceIds = await GetAccessibleWorkspaceIdsAsync();
+        var totalRows = 0;
+
+        foreach (var workspaceId in workspaceIds)
+        {
+            var lakehouses = await TryGetLakehousesForWorkspaceAsync(fabricRestClient, workspaceId);
+            totalRows += lakehouses.Count;
+            await FabricSqlData.AddLakehouseToSqlAsync(lakehouses, workspaceId, notify: false);
+        }
+
+        await FabricSqlData.SetCacheRefreshedAsync("lakehousesList", null, totalRows);
+        await FabricSqlData.SendRefreshNotificationAsync("Lakehouses cache refreshed.");
+    }
+
+    private async Task RefreshWarehousesFromFabricAsync()
+    {
+        var fabricRestClient = await GetReadyFabricRestClientAsync();
+        if (fabricRestClient == null)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(workspaceIdNav))
+        {
+            var warehouses = await TryGetWarehousesForWorkspaceAsync(fabricRestClient, workspaceIdNav);
+            await FabricSqlData.AddWarehouseToSqlAsync(warehouses, workspaceIdNav);
+            return;
+        }
+
+        var workspaceIds = await GetAccessibleWorkspaceIdsAsync();
+        var totalRows = 0;
+
+        foreach (var workspaceId in workspaceIds)
+        {
+            var warehouses = await TryGetWarehousesForWorkspaceAsync(fabricRestClient, workspaceId);
+            totalRows += warehouses.Count;
+            await FabricSqlData.AddWarehouseToSqlAsync(warehouses, workspaceId, notify: false);
+        }
+
+        await FabricSqlData.SetCacheRefreshedAsync("warehousesList", null, totalRows);
+        await FabricSqlData.SendRefreshNotificationAsync("Warehouses cache refreshed.");
+    }
+
+    private async Task<List<Lakehouse>> TryGetLakehousesForWorkspaceAsync(HttpClient fabricRestClient, string workspaceId)
+    {
+        try
+        {
+            await FabricApiData.GetLakehousesApiAsync(fabricRestClient, workspaceId);
+            return (FabricApiData.lakehousesList ?? []).ToList();
+        }
+        catch (Exception ex) when (IsUnsupportedFabricWorkspaceTypeException(ex))
+        {
+            return [];
+        }
+    }
+
+    private async Task<List<Warehouse>> TryGetWarehousesForWorkspaceAsync(HttpClient fabricRestClient, string workspaceId)
+    {
+        try
+        {
+            await FabricApiData.GetWarehousesApiAsync(fabricRestClient, workspaceId);
+            return (FabricApiData.warehousesList ?? []).ToList();
+        }
+        catch (Exception ex) when (IsUnsupportedFabricWorkspaceTypeException(ex))
+        {
+            return [];
+        }
+    }
+
+    private static bool IsUnsupportedFabricWorkspaceTypeException(Exception ex)
+    {
+        return ex.Message.Contains("WorkspaceTypeNotSupported", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string? GetCurrentScopeId()
+    {
+        return FabricObjectType switch
+        {
+            "workspacesList" => capacityIdNav,
+            "datasetsList" => workspaceIdNav,
+            "reportsList" => workspaceIdNav,
+            "lakehousesList" => workspaceIdNav,
+            "warehousesList" => workspaceIdNav,
+            _ => null
+        };
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        if (elapsed.TotalSeconds < 60)
+        {
+            return $"{Math.Max(1, (int)elapsed.TotalSeconds)} sec";
+        }
+
+        if (elapsed.TotalMinutes < 60)
+        {
+            return $"{(int)elapsed.TotalMinutes} min";
+        }
+
+        if (elapsed.TotalHours < 24)
+        {
+            return $"{(int)elapsed.TotalHours} h";
+        }
+
+        return $"{(int)elapsed.TotalDays} d";
+    }
+
+    private async Task RefreshDataset(string datasetId)
+    {
+        Console.WriteLine($"RefreshDataset: {datasetId}");
+
+        var client = await GetReadyFabricClientAsync();
+        if (client == null)
+        {
+            return;
+        }
+
+        var workspaceId = workspaceIdNav;
+        if (string.IsNullOrWhiteSpace(workspaceId))
+        {
+            workspaceId = FabricSqlData.datasetsList?.FirstOrDefault(e => e.Id == datasetId)?.WorkspaceId;
+        }
+
+        var refreshKey = GetDatasetRefreshKey(datasetId, workspaceId);
+        if (!refreshingDatasetKeys.Add(refreshKey))
+        {
+            return;
+        }
+
+        StateHasChanged();
+
+        try
+        {
+            await FabricApiData.RefreshDatasetAsync(client, datasetId, workspaceId);
+            await FabricSqlData.UpdateDatasetRefreshCacheAsync(datasetId, workspaceId, DateTime.UtcNow, "InProgress");
+            var refreshed = FabricSqlData.datasetsList?.FirstOrDefault(e => e.Id == datasetId && e.WorkspaceId == workspaceId);
+            if (refreshed != null)
+            {
+                refreshed.LastRefreshAtUtc = DateTime.UtcNow;
+                refreshed.LastRefreshStatus = "InProgress";
+                refreshed.LastRefreshCacheUpdatedAtUtc = DateTime.UtcNow;
+            }
+
+            _ = MonitorDatasetRefreshStatusAsync(datasetId, workspaceId, client, refreshKey);
+        }
+        catch
+        {
+            refreshingDatasetKeys.Remove(refreshKey);
+            await InvokeAsync(StateHasChanged);
+            throw;
+        }
+    }
+
+    private async Task MonitorDatasetRefreshStatusAsync(string datasetId, string? workspaceId, HttpClient client, string refreshKey)
+    {
+        // Keep polling after manual refresh until status leaves InProgress or timeout is reached.
+        var startedAtUtc = DateTime.UtcNow;
+        try
+        {
+            while (DateTime.UtcNow - startedAtUtc < DatasetInProgressMaxAge)
+            {
+                await Task.Delay(DatasetInProgressPollInterval);
+                try
+                {
+                    var latest = await FabricApiData.GetDatasetLastRefreshAsync(client, datasetId, workspaceId);
+                    await FabricSqlData.UpdateDatasetRefreshCacheAsync(datasetId, workspaceId, latest?.EndTime, latest?.Status);
+
+                    var local = FabricSqlData.datasetsList?.FirstOrDefault(e => e.Id == datasetId && e.WorkspaceId == workspaceId);
+                    if (local != null)
+                    {
+                        local.LastRefreshAtUtc = latest?.EndTime;
+                        local.LastRefreshStatus = latest?.Status;
+                        local.LastRefreshCacheUpdatedAtUtc = DateTime.UtcNow;
+                    }
+
+                    await InvokeAsync(StateHasChanged);
+
+                    if (!string.Equals(latest?.Status, "InProgress", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
+                }
+                catch
+                {
+                    // Keep trying until max age to avoid transient API issues.
+                }
+            }
+        }
+        finally
+        {
+            refreshingDatasetKeys.Remove(refreshKey);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadDatasetRefreshInfoAsync(
+        IEnumerable<string>? allowedDatasetIds = null,
+        IEnumerable<string>? allowedWorkspaceIds = null)
+    {
+        if (FabricObjectType != "datasetsList")
+        {
+            return;
+        }
+
+        var client = await GetReadyFabricClientAsync();
+        var datasets = await FabricSqlData.GetDatasetsForRefreshCacheAsync(workspaceIdNav, activeFilter, allowedDatasetIds, allowedWorkspaceIds);
+        if (client == null || datasets.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var dataset in datasets)
+        {
+            if (string.IsNullOrWhiteSpace(dataset.Id))
+            {
+                continue;
+            }
+
+            try
+            {
+                var workspaceId = workspaceIdNav;
+                if (string.IsNullOrWhiteSpace(workspaceId))
+                {
+                    workspaceId = dataset.WorkspaceId;
+                }
+
+                var isStale = dataset.LastRefreshCacheUpdatedAtUtc == null
+                    || DateTime.UtcNow - dataset.LastRefreshCacheUpdatedAtUtc.Value > DatasetRefreshCacheTtl;
+                var isInProgressAndAged = string.Equals(dataset.LastRefreshStatus, "InProgress", StringComparison.OrdinalIgnoreCase)
+                    && dataset.LastRefreshCacheUpdatedAtUtc != null
+                    && DateTime.UtcNow - dataset.LastRefreshCacheUpdatedAtUtc.Value > DatasetInProgressPollInterval;
+                if (!isStale)
+                {
+                    if (!isInProgressAndAged)
+                    {
+                        continue;
+                    }
+                }
+
+                var lastRefresh = await FabricApiData.GetDatasetLastRefreshAsync(client, dataset.Id, workspaceId);
+                await FabricSqlData.UpdateDatasetRefreshCacheAsync(dataset.Id, workspaceId, lastRefresh?.EndTime, lastRefresh?.Status);
+            }
+            catch
+            {
+                // Keep previous cached value on transient REST/API failures.
+            }
+        }
+
+        await FabricSqlData.GetDatasetsSqlAsync(workspaceIdNav, activeFilter, allowedDatasetIds, allowedWorkspaceIds);
+    }
+
+    private async Task<List<string>> GetAccessibleCapacityIdsAsync()
+    {
+        if (await IsPowerBiInventoryAdminAsync())
+        {
+            return [];
+        }
+
+        if (TryGetAccessCache(out _) && cachedAccessibleCapacityIds != null)
+        {
+            return cachedAccessibleCapacityIds;
+        }
+
+        var userKey = await GetCurrentUserKeyAsync();
+        if (userKey == null)
+        {
+            return [];
+        }
+
+        var cached = await FabricSqlData.GetValidUserAccessObjectIdsAsync(userKey.Value.UserKey, "capacity", AccessCacheTtl);
+        if (cached != null)
+        {
+            cachedAccessibleCapacityIds = cached;
+            cachedAccessFetchedAtUtc = DateTime.UtcNow;
+            return cachedAccessibleCapacityIds;
+        }
+
+        await RefreshUserAccessCacheFromPowerBiAsync(userKey.Value.UserKey, userKey.Value.UserName);
+        return cachedAccessibleCapacityIds ?? [];
+    }
+
+    private async Task RefreshUserAccessCacheFromPowerBiAsync(string userKey, string? userName)
+    {
+        var client = await GetReadyFabricClientAsync();
+        if (client == null)
+        {
+            cachedAccessibleCapacityIds = [];
+            cachedAccessibleWorkspaceIds = [];
+            cachedAccessFetchedAtUtc = DateTime.UtcNow;
+            return;
+        }
+
+        await FabricApiData.GetCapacitiesApiAsync(client);
+        await FabricApiData.GetWorkspacesApiAsync(client, capacityIdNav);
+
+        var capacityIds = (FabricApiData.capacitiesList ?? [])
+            .Select(e => e.Id)
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var workspaceIds = (FabricApiData.workspacesList ?? [])
+            .Select(e => e.Id)
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        await FabricSqlData.ReplaceUserAccessCacheAsync(userKey, userName, capacityIds, workspaceIds, capacityIdNav);
+
+        cachedAccessibleCapacityIds = capacityIds;
+        cachedAccessibleWorkspaceIds = workspaceIds;
+        cachedAccessFetchedAtUtc = DateTime.UtcNow;
+    }
+
+    private async Task<bool> IsPowerBiInventoryAdminAsync()
+    {
+        if (isPowerBiInventoryAdmin.HasValue)
+        {
+            return isPowerBiInventoryAdmin.Value;
+        }
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            isPowerBiInventoryAdmin = false;
+            return false;
+        }
+
+        isPowerBiInventoryAdmin = await AdminAccessEvaluator.IsPowerBiInventoryAdminAsync(user, Configuration);
+        return isPowerBiInventoryAdmin.Value;
+    }
+
+    private async Task<List<string>> GetAccessibleWorkspaceIdsAsync()
+    {
+        if (await IsPowerBiInventoryAdminAsync())
+        {
+            return await FabricSqlData.GetActiveWorkspaceIdsAsync();
+        }
+
+        if (TryGetAccessCache(out _) && cachedAccessibleWorkspaceIds != null)
+        {
+            return cachedAccessibleWorkspaceIds;
+        }
+
+        var userKey = await GetCurrentUserKeyAsync();
+        if (userKey == null)
+        {
+            return [];
+        }
+
+        var cached = await FabricSqlData.GetValidUserAccessObjectIdsAsync(userKey.Value.UserKey, "workspace", AccessCacheTtl, capacityIdNav);
+        if (cached != null)
+        {
+            cachedAccessibleWorkspaceIds = cached;
+            cachedAccessFetchedAtUtc = DateTime.UtcNow;
+            return cachedAccessibleWorkspaceIds;
+        }
+
+        await RefreshUserAccessCacheFromPowerBiAsync(userKey.Value.UserKey, userKey.Value.UserName);
+        return cachedAccessibleWorkspaceIds ?? [];
+    }
+
+    private async Task<(string UserKey, string? UserName)?> GetCurrentUserKeyAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        var userName = user.Identity?.Name;
+        var objectId = user.FindFirst("oid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var userKey = !string.IsNullOrWhiteSpace(userName)
+            ? userName.Trim().ToLowerInvariant()
+            : objectId?.Trim().ToLowerInvariant();
+
+        return string.IsNullOrWhiteSpace(userKey)
+            ? null
+            : (userKey, userName);
+    }
+
+    private bool TryGetAccessCache(out DateTime fetchedAtUtc)
+    {
+        fetchedAtUtc = cachedAccessFetchedAtUtc ?? DateTime.MinValue;
+        if (cachedAccessFetchedAtUtc == null)
+        {
+            return false;
+        }
+
+        return DateTime.UtcNow - cachedAccessFetchedAtUtc.Value < AccessCacheTtl;
+    }
+
+    private void InvalidateAccessCache()
+    {
+        cachedAccessibleCapacityIds = null;
+        cachedAccessibleWorkspaceIds = null;
+        cachedAccessFetchedAtUtc = null;
+    }
+
+    private void SchedulePowerBiTokenChallenge()
+    {
+        refreshErrorText = "Fabric/Power BI requires sign-in or consent. Redirecting...";
+        pendingPowerBiTokenChallenge = true;
+    }
+
+    private static bool IsUiRequiredTokenException(Exception ex)
+    {
+        if (ex is MicrosoftIdentityWebChallengeUserException)
+        {
+            return true;
+        }
+
+        if (ex is MsalUiRequiredException)
+        {
+            return true;
+        }
+
+        if (ex.InnerException is MsalUiRequiredException)
+        {
+            return true;
+        }
+
+        return ex.Message.Contains("No account or login hint was passed to the AcquireTokenSilent call", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("user_null", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("IDW10502", StringComparison.OrdinalIgnoreCase);
+    }
+
+
+    private string GetDatasetLastRefreshText(Dataset dataset)
+    {
+        if (string.IsNullOrWhiteSpace(dataset.Id))
+        {
+            return "-";
+        }
+
+        if (dataset.LastRefreshAtUtc == null)
+        {
+            return "-";
+        }
+
+        return dataset.LastRefreshAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+    }
+
+    private string GetDatasetLastRefreshStatusText(Dataset dataset)
+    {
+        if (string.IsNullOrWhiteSpace(dataset.Id))
+        {
+            return "-";
+        }
+
+        if (string.IsNullOrWhiteSpace(dataset.LastRefreshStatus))
+        {
+            return "-";
+        }
+
+        return dataset.LastRefreshStatus;
+    }
+
+    private string GetDatasetRefreshSummaryText(Dataset dataset)
+    {
+        var statusText = GetDatasetLastRefreshStatusText(dataset);
+        var refreshText = GetDatasetLastRefreshText(dataset);
+
+        if (statusText == "-" && refreshText == "-")
+        {
+            return "No history";
+        }
+
+        return $"{statusText} ({refreshText})";
+    }
+
+    private RenderFragment RenderDatasetRefreshSummary(Dataset dataset) => @<div class="dataset-refresh-summary">
+        @if (!string.IsNullOrWhiteSpace(dataset.Id))
+        {
+            var isRefreshing = IsDatasetRefreshing(dataset);
+            <Button Color="ButtonColor.Warning"
+                    Size="ButtonSize.Small"
+                    @onclick="(() => RefreshDataset(dataset.Id))"
+                    title="Refresh dataset"
+                    class="icon-only-btn"
+                    Disabled="@isRefreshing">
+                @if (isRefreshing)
+                {
+                    <span class="spinner-border spinner-border-sm dataset-refresh-spinner" role="status" aria-hidden="true"></span>
+                }
+                else
+                {
+                    <i class="bi bi-arrow-clockwise"></i>
+                }
+            </Button>
+        }
+        <span class="dataset-refresh-text">@GetDatasetRefreshSummaryText(dataset)</span>
+    </div>;
+
+    private bool IsDatasetRefreshing(Dataset dataset)
+    {
+        if (string.IsNullOrWhiteSpace(dataset.Id))
+        {
+            return false;
+        }
+
+        return refreshingDatasetKeys.Contains(GetDatasetRefreshKey(dataset.Id, ResolveDatasetWorkspaceId(dataset)));
+    }
+
+    private string GetDatasetRefreshKey(string datasetId, string? workspaceId)
+    {
+        return $"{workspaceId ?? "all"}:{datasetId}";
+    }
+
+    private string? ResolveDatasetWorkspaceId(Dataset dataset)
+    {
+        return string.IsNullOrWhiteSpace(workspaceIdNav) ? dataset.WorkspaceId : workspaceIdNav;
+    }
+
+    private string GetDatasetDetailsLink(Dataset dataset)
+    {
+        var resolvedWorkspaceId = ResolveDatasetWorkspaceId(dataset);
+
+        if (!string.IsNullOrWhiteSpace(resolvedWorkspaceId) && !string.IsNullOrWhiteSpace(dataset.Id))
+        {
+            return $"/datasets/{resolvedWorkspaceId}/{dataset.Id}";
+        }
+
+        return "/datasets";
+    }
+
+    private string GetDatasetLink(Report report)
+    {
+        if (!string.IsNullOrWhiteSpace(report.DatasetWorkspaceId) && !string.IsNullOrWhiteSpace(report.DatasetId))
+        {
+            return $"/datasets/{report.DatasetWorkspaceId}/{report.DatasetId}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(report.WorkspaceId) && !string.IsNullOrWhiteSpace(report.DatasetId))
+        {
+            return $"/datasets/{report.WorkspaceId}/{report.DatasetId}";
+        }
+
+        return "/datasets";
+    }
+
+}

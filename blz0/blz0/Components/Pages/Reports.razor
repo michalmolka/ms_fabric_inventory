@@ -1,0 +1,18 @@
+﻿@page "/reports"
+@page "/reports/{workspaceIdNav}"
+@rendermode InteractiveServer
+
+<PageTitle>Reports</PageTitle>
+<BreadcrumbCustom />
+<h3>Reports</h3>
+<CascadingValue Value="@FabricObjectType" Name="FabricObjectType">
+    <CascadingValue Value="@workspaceIdNav" TValue="string" Name="workspaceIdNav">
+        <Tables />
+    </CascadingValue>
+</CascadingValue>
+
+@code {
+    public string? FabricObjectType = "reportsList";
+    [Parameter]
+    public string? workspaceIdNav { get; set; }
+}

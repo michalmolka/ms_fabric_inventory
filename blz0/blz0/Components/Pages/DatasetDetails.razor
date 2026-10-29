@@ -1,0 +1,241 @@
+@page "/datasets/{workspaceId}/{datasetId}"
+@rendermode InteractiveServer
+@using Models
+@using Operations
+@using SharedServices
+@using blz0.Authorization
+@inject FabricApiData FabricApiData
+@inject SharedFabricAuth SharedFabricAuth
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IConfiguration Configuration
+@inject IJSRuntime JS
+
+<PageTitle>Dataset Details</PageTitle>
+<BreadcrumbCustom />
+<h3>Dataset Details</h3>
+<button type="button" class="btn btn-outline-secondary mb-3" @onclick="GoBackAsync">Back</button>
+
+@if (!string.IsNullOrWhiteSpace(errorText))
+{
+    <p class="text-danger fw-semibold">@errorText</p>
+}
+else if (dataset == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(warningText))
+    {
+        <p class="text-warning fw-semibold">@warningText</p>
+    }
+
+    <table class="table table-bordered table-striped">
+        <tbody>
+            <tr><th>Id</th><td>@dataset.Id</td></tr>
+            <tr><th>Name</th><td>@dataset.Name</td></tr>
+            <tr><th>Workspace Id</th><td>@workspaceId</td></tr>
+            <tr><th>Web URL</th><td>@dataset.WebUrl</td></tr>
+            <tr><th>Configured By</th><td>@dataset.ConfiguredBy</td></tr>
+            <tr><th>Is Refreshable</th><td>@dataset.IsRefreshable</td></tr>
+            <tr><th>Storage Mode</th><td>@dataset.TargetStorageMode</td></tr>
+            <tr><th>Created Date</th><td>@dataset.CreatedDate</td></tr>
+            <tr><th>Add Rows API Enabled</th><td>@dataset.AddRowsAPIEnabled</td></tr>
+            <tr><th>Effective Identity Required</th><td>@dataset.IsEffectiveIdentityRequired</td></tr>
+            <tr><th>Identity Roles Required</th><td>@dataset.IsEffectiveIdentityRolesRequired</td></tr>
+            <tr><th>On-Prem Gateway Required</th><td>@dataset.IsOnPremGatewayRequired</td></tr>
+        </tbody>
+    </table>
+
+    <h4>Refresh History</h4>
+    @if (refreshHistory.Count == 0)
+    {
+        <p>No refresh history available.</p>
+    }
+    else
+    {
+        <table class="table table-bordered table-striped">
+            <thead>
+                <tr>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in refreshHistory)
+                {
+                    <tr>
+                        <td>@FormatDate(item.StartTime)</td>
+                        <td>@FormatDate(item.EndTime)</td>
+                        <td>@(string.IsNullOrWhiteSpace(item.RefreshType) ? "-" : item.RefreshType)</td>
+                        <td>@(string.IsNullOrWhiteSpace(item.Status) ? "-" : item.Status)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h4>Reports Using This Dataset</h4>
+    @if (reportsUsingDataset.Count == 0)
+    {
+        <p>No reports found for this dataset.</p>
+    }
+    else
+    {
+        <table class="table table-bordered table-striped">
+            <thead>
+                <tr>
+                    <th>Report Id</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var report in reportsUsingDataset)
+                {
+                    <tr>
+                        <td>
+                            @if (!string.IsNullOrWhiteSpace(report.Id) && !string.IsNullOrWhiteSpace(report.WorkspaceId))
+                            {
+                                <NavLink href="@($"/reports/{report.WorkspaceId}/{report.Id}")">@report.Id</NavLink>
+                            }
+                            else
+                            {
+                                @report.Id
+                            }
+                        </td>
+                        <td>@report.Name</td>
+                        <td>@report.ReportType</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    [Parameter]
+    public string? workspaceId { get; set; }
+
+    [Parameter]
+    public string? datasetId { get; set; }
+
+    private Dataset? dataset;
+    private string? errorText;
+    private string? warningText;
+    private List<DatasetRefreshItem> refreshHistory = [];
+    private List<Report> reportsUsingDataset = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        errorText = null;
+        warningText = null;
+        dataset = null;
+        refreshHistory = [];
+        reportsUsingDataset = [];
+
+        if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(datasetId))
+        {
+            errorText = "Missing workspace id or dataset id.";
+            return;
+        }
+
+        try
+        {
+            var clients = await GetFabricClientsForDetailsAsync();
+            if (clients.Count == 0)
+            {
+                errorText = "Power BI token is not ready.";
+                return;
+            }
+
+            Exception? lastException = null;
+            foreach (var client in clients)
+            {
+                try
+                {
+                    dataset = await FabricApiData.GetDatasetByIdAsync(client, workspaceId, datasetId);
+                    if (dataset == null)
+                    {
+                        errorText = "Dataset not found.";
+                        return;
+                    }
+
+                    try
+                    {
+                        refreshHistory = await FabricApiData.GetDatasetRefreshHistoryAsync(client, datasetId, workspaceId, top: 25);
+                    }
+                    catch
+                    {
+                        refreshHistory = [];
+                        warningText = "Refresh history is not available for this dataset.";
+                    }
+
+                    try
+                    {
+                        reportsUsingDataset = await FabricApiData.GetReportsUsingDatasetAsync(client, workspaceId, datasetId);
+                    }
+                    catch
+                    {
+                        reportsUsingDataset = [];
+                        warningText = "Some related data is not available due to API permissions.";
+                    }
+                    return;
+                }
+                catch (Exception ex) when (ShouldTryFallback(ex))
+                {
+                    lastException = ex;
+                }
+            }
+
+            if (lastException != null)
+            {
+                throw lastException;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorText = ex.Message;
+        }
+    }
+
+    private async Task<List<HttpClient>> GetFabricClientsForDetailsAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            return [];
+        }
+
+        var clients = new List<HttpClient>();
+        var delegatedClient = SharedFabricAuth.IsTokenReady ? SharedFabricAuth.FabricAuth.tokenAuto : null;
+
+        if (delegatedClient != null)
+        {
+            clients.Add(delegatedClient);
+        }
+
+        return clients;
+    }
+
+    private static bool ShouldTryFallback(Exception ex)
+    {
+        return ex is InvalidOperationException
+            && (ex.Message.Contains("401", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("403", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("500", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string FormatDate(DateTime? value)
+    {
+        return value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+    }
+
+    private async Task GoBackAsync()
+    {
+        await JS.InvokeVoidAsync("history.back");
+    }
+}

@@ -1,0 +1,18 @@
+﻿@page "/lakehouses"
+@page "/lakehouses/{workspaceIdNav}"
+@rendermode InteractiveServer
+
+<PageTitle>Lakehouses</PageTitle>
+<BreadcrumbCustom />
+<h3>Lakehouses</h3>
+<CascadingValue Value="@FabricObjectType" Name="FabricObjectType">
+    <CascadingValue Value="@workspaceIdNav" TValue="string" Name="workspaceIdNav">
+        <Tables />
+    </CascadingValue>
+</CascadingValue>
+
+@code {
+    public string FabricObjectType = "lakehousesList";
+    [Parameter]
+    public string? workspaceIdNav { get; set; }
+}

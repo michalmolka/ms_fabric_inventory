@@ -1,0 +1,13 @@
+﻿@page "/capacities"
+@rendermode InteractiveServer
+
+<PageTitle>Capacities</PageTitle>
+<BreadcrumbCustom />
+<h3>Capacities </h3>
+<CascadingValue Value="@FabricObjectType" Name="FabricObjectType">
+    <Tables />
+</CascadingValue>
+
+@code {
+    public string? FabricObjectType = "capacitiesList";
+}

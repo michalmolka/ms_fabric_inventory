@@ -1,0 +1,63 @@
+@using BlazorBootstrap
+@using Models
+
+@if (Items == null)
+{
+    <p>No data.</p>
+}
+else
+{
+    <div class="table-scroll-x">
+        <Grid TItem="Lakehouse"
+              Class="table table-hover table-bordered table-striped"
+              DataProvider="LoadItems"
+              AllowFiltering="true"
+              AllowPaging="true"
+              PageSize="15"
+              AllowSorting="true"
+              Responsive="true">
+            <GridColumns>
+                <GridColumn TItem="Lakehouse" HeaderText="Id" class="fs-6 text-muted fw-light" PropertyName="Id" SortKeySelector="item => item.Id">
+                    @if (!string.IsNullOrWhiteSpace(context.Id) && !string.IsNullOrWhiteSpace(context.WorkspaceId))
+                    {
+                        <NavLink href="@($"/lakehouses/{context.WorkspaceId}/{context.Id}")">@context.Id</NavLink>
+                    }
+                </GridColumn>
+                <GridColumn TItem="Lakehouse" HeaderText="Name" class="fs-6 text-muted fw-light" PropertyName="DisplayName" SortKeySelector="item => item.DisplayName">
+                    @context.DisplayName
+                </GridColumn>
+                <GridColumn TItem="Lakehouse" HeaderText="Status" class="fs-6 text-muted fw-light" PropertyName="IsActive" SortKeySelector="item => item.IsActive">
+                    <span class='badge @(context.IsActive ? "text-bg-success" : "text-bg-secondary")'>@(context.IsActive ? "Active" : "Inactive")</span>
+                </GridColumn>
+                <GridColumn TItem="Lakehouse" HeaderText="WorkspaceId" class="fs-6 text-muted fw-light" PropertyName="WorkspaceId" SortKeySelector="item => item.WorkspaceId">
+                    @if (!string.IsNullOrWhiteSpace(context.WorkspaceId))
+                    {
+                        <NavLink href="@($"/workspaces/details/{context.WorkspaceId}")">@context.WorkspaceId</NavLink>
+                    }
+                </GridColumn>
+                <GridColumn TItem="Lakehouse" HeaderText="SQL Endpoint" class="fs-6 text-muted fw-light" PropertyName="SqlEndpointProvisioningStatus" SortKeySelector="item => item.SqlEndpointProvisioningStatus">
+                    @context.SqlEndpointProvisioningStatus
+                </GridColumn>
+                <GridColumn TItem="Lakehouse" HeaderText="DefaultSchema" class="fs-6 text-muted fw-light" PropertyName="DefaultSchema" SortKeySelector="item => item.DefaultSchema">
+                    @context.DefaultSchema
+                </GridColumn>
+                <GridColumn TItem="Lakehouse" HeaderText="OneLake Tables" class="fs-6 text-muted fw-light" PropertyName="OneLakeTablesPath" SortKeySelector="item => item.OneLakeTablesPath">
+                    @context.OneLakeTablesPath
+                </GridColumn>
+                <GridColumn TItem="Lakehouse" HeaderText="ConnectionString" class="fs-6 text-muted fw-light" PropertyName="SqlEndpointConnectionString" SortKeySelector="item => item.SqlEndpointConnectionString">
+                    @context.SqlEndpointConnectionString
+                </GridColumn>
+            </GridColumns>
+        </Grid>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IEnumerable<Lakehouse>? Items { get; set; }
+
+    private Task<GridDataProviderResult<Lakehouse>> LoadItems(GridDataProviderRequest<Lakehouse> request)
+    {
+        return Task.FromResult(request.ApplyTo(Items?.ToList() ?? new List<Lakehouse>()));
+    }
+}

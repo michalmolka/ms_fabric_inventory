@@ -1,0 +1,69 @@
+﻿<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">
+            <img class="brand-logo" src="assets/brand/fabric_48_color.svg" alt="Fabric logo" />
+            <span>Fabric Monitor</span>
+        </a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span>
+                <span>Home</span>
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="Dashboard">
+                <Icon Name="IconName.BarChart" Size="IconSize.x4" />
+                <span>Dashboard</span>
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="Capacities">
+                <Icon Name="IconName.Cpu" Size="IconSize.x4" />
+                <span>Capacities</span>
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="Workspaces">
+                <Icon Name="IconName.Copy" Size="IconSize.x4" />
+                <span>Workspaces</span>
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="Datasets">
+                <Icon Name="IconName.Database" Size="IconSize.x4" />
+                <span>Datasets</span>
+            </NavLink>
+        </div>
+                <div class="nav-item px-3">
+            <NavLink class="nav-link" href="Reports">
+                <Icon Name="IconName.PieChart" Size="IconSize.x4" />
+                <span>Reports</span>
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="Lakehouses">
+                <Icon Name="IconName.Water" Size="IconSize.x4" />
+                <span>Lakehouses</span>
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="Warehouses">
+                <Icon Name="IconName.House" Size="IconSize.x4" />
+                <span>Warehouses</span>
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="eventlog">
+                <Icon Name="IconName.GraphUp" Size="IconSize.x4" />
+                <span>Event Log</span>
+            </NavLink>
+        </div>
+    </nav>
+</div>

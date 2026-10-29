@@ -1,0 +1,58 @@
+﻿@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+@using blz0.Authorization
+@using blz0.Components.Pages
+@inject IConfiguration Configuration
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="user-chip-wrap">
+            <AuthorizeView>
+                <Authorized>
+                    <div class="user-actions">
+                        <TokenState />
+                        <span class="btn btn-secondary btn-sm user-chip">
+                            @context.User.Identity?.Name@if (isAdminUser)
+                            {
+                                <text> (ADMIN)</text>
+                            }
+                        </span>
+                        <a class="btn btn-secondary btn-sm user-action-link" href="/MicrosoftIdentity/Account/SignOut">Sign out</a>
+                        <a class="btn btn-secondary btn-sm user-action-link" href="/account/change-user">Change user</a>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
+        </div>
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private bool isAdminUser;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        if (authState.User.Identity?.IsAuthenticated == true)
+        {
+            isAdminUser = await AdminAccessEvaluator.IsPowerBiInventoryAdminAsync(authState.User, Configuration);
+        }
+        else
+        {
+            isAdminUser = false;
+        }
+    }
+}

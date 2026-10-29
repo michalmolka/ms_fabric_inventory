@@ -1,0 +1,18 @@
+﻿@page "/datasets/"
+@page "/datasets/{workspaceIdNav}"
+@rendermode InteractiveServer
+
+<PageTitle>Datasets</PageTitle>
+<BreadcrumbCustom />
+<h3>Datasets </h3>
+<CascadingValue Value="@FabricObjectType" Name="FabricObjectType">
+    <CascadingValue Value="@workspaceIdNav" TValue="string" Name="workspaceIdNav">
+    <Tables />
+</CascadingValue>
+</CascadingValue>
+
+@code {
+    public string FabricObjectType = "datasetsList";
+    [Parameter]
+    public string? workspaceIdNav { get; set; }
+}

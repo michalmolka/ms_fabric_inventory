@@ -1,0 +1,58 @@
+@using BlazorBootstrap
+@using Models
+
+@if (Items == null)
+{
+    <p>No data.</p>
+}
+else
+{
+    <Grid TItem="Capacity"
+          Class="table table-hover table-bordered table-striped"
+          DataProvider="LoadItems"
+          AllowFiltering="true"
+          AllowPaging="true"
+          PageSize="15"
+          AllowSorting="true"
+          Responsive="true">
+        <GridColumns>
+            <GridColumn TItem="Capacity" HeaderText="id" class="fs-6 text-muted fw-light" PropertyName="Id" SortKeySelector="item => item.Id">
+                @if (!string.IsNullOrWhiteSpace(context.Id))
+                {
+                    <NavLink href="@($"/capacities/{context.Id}")">@context.Id</NavLink>
+                }
+            </GridColumn>
+            <GridColumn TItem="Capacity" HeaderText="displayName" class="fs-6 text-muted fw-light" PropertyName="DisplayName" SortKeySelector="item => item.DisplayName">
+                @context.DisplayName
+            </GridColumn>
+            <GridColumn TItem="Capacity" HeaderText="Status" class="fs-6 text-muted fw-light" PropertyName="IsActive" SortKeySelector="item => item.IsActive">
+                <span class='badge @(context.IsActive ? "text-bg-success" : "text-bg-secondary")'>@(context.IsActive ? "Active" : "Inactive")</span>
+            </GridColumn>
+            <GridColumn TItem="Capacity" HeaderText="sku" class="fs-6 text-muted fw-light" PropertyName="Sku" SortKeySelector="item => item.Sku">
+                @context.Sku
+            </GridColumn>
+            <GridColumn TItem="Capacity" HeaderText="state" class="fs-6 text-muted fw-light" PropertyName="State" SortKeySelector="item => item.State">
+                @context.State
+            </GridColumn>
+            <GridColumn TItem="Capacity" HeaderText="region" class="fs-6 text-muted fw-light" PropertyName="Region" SortKeySelector="item => item.Region">
+                @context.Region
+            </GridColumn>
+            <GridColumn TItem="Capacity" HeaderText="Open" class="fs-6 text-muted fw-light" PropertyName="Id">
+                @if (!string.IsNullOrWhiteSpace(context.Id))
+                {
+                    <NavLink href="@($"/workspaces/{context.Id}")">Open</NavLink>
+                }
+            </GridColumn>
+        </GridColumns>
+    </Grid>
+}
+
+@code {
+    [Parameter]
+    public IEnumerable<Capacity>? Items { get; set; }
+
+    private Task<GridDataProviderResult<Capacity>> LoadItems(GridDataProviderRequest<Capacity> request)
+    {
+        return Task.FromResult(request.ApplyTo(Items?.ToList() ?? new List<Capacity>()));
+    }
+}

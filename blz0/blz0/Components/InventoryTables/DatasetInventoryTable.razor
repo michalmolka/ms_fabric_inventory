@@ -1,0 +1,62 @@
+@using BlazorBootstrap
+@using Models
+
+@if (Items == null)
+{
+    <p>No data.</p>
+}
+else
+{
+    <div class="table-scroll-x">
+        <Grid TItem="Dataset"
+              Class="table table-hover table-bordered table-striped"
+              DataProvider="LoadItems"
+              AllowFiltering="true"
+              AllowPaging="true"
+              PageSize="15"
+              AllowSorting="true"
+              Responsive="true">
+            <GridColumns>
+                <GridColumn TItem="Dataset" HeaderText="Id" class="fs-6 text-muted fw-light" PropertyName="Id" SortKeySelector="item => item.Id">
+                    @if (!string.IsNullOrWhiteSpace(context.Id))
+                    {
+                        <NavLink href="@GetDetailsLink(context)">@context.Id</NavLink>
+                    }
+                </GridColumn>
+                <GridColumn TItem="Dataset" HeaderText="Name" class="fs-6 text-muted fw-light" PropertyName="Name" SortKeySelector="item => item.Name">
+                    @context.Name
+                </GridColumn>
+                <GridColumn TItem="Dataset" HeaderText="Status" class="fs-6 text-muted fw-light" PropertyName="IsActive" SortKeySelector="item => item.IsActive">
+                    <span class='badge @(context.IsActive ? "text-bg-success" : "text-bg-secondary")'>@(context.IsActive ? "Active" : "Inactive")</span>
+                </GridColumn>
+                <GridColumn TItem="Dataset" HeaderText="TargetStorageMode" class="fs-6 text-muted fw-light" PropertyName="TargetStorageMode" SortKeySelector="item => item.TargetStorageMode">
+                    @context.TargetStorageMode
+                </GridColumn>
+                <GridColumn TItem="Dataset" HeaderText="CreatedDate" class="fs-6 text-muted fw-light" PropertyName="CreatedDate" SortKeySelector="item => item.CreatedDate">
+                    @context.CreatedDate
+                </GridColumn>
+                <GridColumn TItem="Dataset" HeaderText="Refresh Status" class="fs-6 text-muted fw-light" PropertyName="Id">
+                    @RefreshSummary(context)
+                </GridColumn>
+            </GridColumns>
+        </Grid>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IEnumerable<Dataset>? Items { get; set; }
+
+    [Parameter]
+    public Func<Dataset, string> DetailsLink { get; set; } = _ => "/datasets";
+
+    [Parameter]
+    public RenderFragment<Dataset> RefreshSummary { get; set; } = _ => @<span>No history</span>;
+
+    private string GetDetailsLink(Dataset dataset) => DetailsLink(dataset);
+
+    private Task<GridDataProviderResult<Dataset>> LoadItems(GridDataProviderRequest<Dataset> request)
+    {
+        return Task.FromResult(request.ApplyTo(Items?.ToList() ?? new List<Dataset>()));
+    }
+}

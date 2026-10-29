@@ -1,0 +1,133 @@
+@page "/reports/{workspaceId}/{reportId}"
+@rendermode InteractiveServer
+@using Models
+@using Operations
+@using SharedServices
+@using blz0.Authorization
+@inject FabricApiData FabricApiData
+@inject SharedFabricAuth SharedFabricAuth
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IConfiguration Configuration
+@inject IJSRuntime JS
+
+<PageTitle>Report Details</PageTitle>
+<BreadcrumbCustom />
+<h3>Report Details</h3>
+<button type="button" class="btn btn-outline-secondary mb-3" @onclick="GoBackAsync">Back</button>
+
+@if (!string.IsNullOrWhiteSpace(errorText))
+{
+    <p class="text-danger fw-semibold">@errorText</p>
+}
+else if (report == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-bordered table-striped">
+        <tbody>
+            <tr><th>Id</th><td>@report.Id</td></tr>
+            <tr><th>Name</th><td>@report.Name</td></tr>
+            <tr><th>Workspace Id</th><td>@workspaceId</td></tr>
+            <tr><th>Report Type</th><td>@report.ReportType</td></tr>
+            <tr><th>Is From PBIX</th><td>@report.IsFromPbix</td></tr>
+            <tr><th>Dataset Id</th><td>@report.DatasetId</td></tr>
+            <tr><th>Dataset Workspace Id</th><td>@report.DatasetWorkspaceId</td></tr>
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter]
+    public string? workspaceId { get; set; }
+
+    [Parameter]
+    public string? reportId { get; set; }
+
+    private Report? report;
+    private string? errorText;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        errorText = null;
+        report = null;
+
+        if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(reportId))
+        {
+            errorText = "Missing workspace id or report id.";
+            return;
+        }
+
+        try
+        {
+            var clients = await GetFabricClientsForDetailsAsync();
+            if (clients.Count == 0)
+            {
+                errorText = "Power BI token is not ready.";
+                return;
+            }
+
+            Exception? lastException = null;
+            foreach (var client in clients)
+            {
+                try
+                {
+                    report = await FabricApiData.GetReportByIdAsync(client, workspaceId, reportId);
+                    if (report == null)
+                    {
+                        errorText = "Report not found.";
+                    }
+
+                    return;
+                }
+                catch (Exception ex) when (ShouldTryFallback(ex))
+                {
+                    lastException = ex;
+                }
+            }
+
+            if (lastException != null)
+            {
+                throw lastException;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorText = ex.Message;
+        }
+    }
+
+    private async Task<List<HttpClient>> GetFabricClientsForDetailsAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            return [];
+        }
+
+        var clients = new List<HttpClient>();
+        var delegatedClient = SharedFabricAuth.IsTokenReady ? SharedFabricAuth.FabricAuth.tokenAuto : null;
+
+        if (delegatedClient != null)
+        {
+            clients.Add(delegatedClient);
+        }
+
+        return clients;
+    }
+
+    private static bool ShouldTryFallback(Exception ex)
+    {
+        return ex is InvalidOperationException
+            && (ex.Message.Contains("401", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("403", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("500", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task GoBackAsync()
+    {
+        await JS.InvokeVoidAsync("history.back");
+    }
+}

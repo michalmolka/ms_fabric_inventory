@@ -1,0 +1,129 @@
+@page "/capacities/{capacityId}"
+@rendermode InteractiveServer
+@using Models
+@using Operations
+@using SharedServices
+@using blz0.Authorization
+@inject FabricApiData FabricApiData
+@inject SharedFabricAuth SharedFabricAuth
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IConfiguration Configuration
+@inject IJSRuntime JS
+
+<PageTitle>Capacity Details</PageTitle>
+<BreadcrumbCustom />
+<h3>Capacity Details</h3>
+<button type="button" class="btn btn-outline-secondary mb-3" @onclick="GoBackAsync">Back</button>
+
+@if (!string.IsNullOrWhiteSpace(errorText))
+{
+    <p class="text-danger fw-semibold">@errorText</p>
+}
+else if (capacity == null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="table table-bordered table-striped">
+        <tbody>
+            <tr><th>Id</th><td>@capacity.Id</td></tr>
+            <tr><th>Display Name</th><td>@capacity.DisplayName</td></tr>
+            <tr><th>SKU</th><td>@capacity.Sku</td></tr>
+            <tr><th>State</th><td>@capacity.State</td></tr>
+            <tr><th>Region</th><td>@capacity.Region</td></tr>
+            <tr><th>User Access Right</th><td>@capacity.CapacityUserAccessRight</td></tr>
+        </tbody>
+    </table>
+}
+
+@code {
+    [Parameter]
+    public string? capacityId { get; set; }
+
+    private Capacity? capacity;
+    private string? errorText;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        errorText = null;
+        capacity = null;
+
+        if (string.IsNullOrWhiteSpace(capacityId))
+        {
+            errorText = "Missing capacity id.";
+            return;
+        }
+
+        try
+        {
+            var clients = await GetFabricClientsForDetailsAsync();
+            if (clients.Count == 0)
+            {
+                errorText = "Power BI token is not ready.";
+                return;
+            }
+
+            Exception? lastException = null;
+            foreach (var client in clients)
+            {
+                try
+                {
+                    capacity = await FabricApiData.GetCapacityByIdAsync(client, capacityId);
+                    if (capacity == null)
+                    {
+                        errorText = "Capacity not found.";
+                    }
+
+                    return;
+                }
+                catch (Exception ex) when (ShouldTryFallback(ex))
+                {
+                    lastException = ex;
+                }
+            }
+
+            if (lastException != null)
+            {
+                throw lastException;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorText = ex.Message;
+        }
+    }
+
+    private async Task<List<HttpClient>> GetFabricClientsForDetailsAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            return [];
+        }
+
+        var clients = new List<HttpClient>();
+        var delegatedClient = SharedFabricAuth.IsTokenReady ? SharedFabricAuth.FabricAuth.tokenAuto : null;
+
+        if (delegatedClient != null)
+        {
+            clients.Add(delegatedClient);
+        }
+
+        return clients;
+    }
+
+    private static bool ShouldTryFallback(Exception ex)
+    {
+        return ex is InvalidOperationException
+            && (ex.Message.Contains("401", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("403", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("500", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task GoBackAsync()
+    {
+        await JS.InvokeVoidAsync("history.back");
+    }
+}

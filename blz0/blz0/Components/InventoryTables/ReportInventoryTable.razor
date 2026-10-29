@@ -1,0 +1,66 @@
+@using BlazorBootstrap
+@using Models
+
+@if (Items == null)
+{
+    <p>No data.</p>
+}
+else
+{
+    <Grid TItem="Report"
+          Class="table table-hover table-bordered table-striped"
+          DataProvider="LoadItems"
+          AllowFiltering="true"
+          AllowPaging="true"
+          PageSize="15"
+          AllowSorting="true"
+          Responsive="true">
+        <GridColumns>
+            <GridColumn TItem="Report" HeaderText="Id" class="fs-6 text-muted fw-light" PropertyName="Id" SortKeySelector="item => item.Id">
+                @if (!string.IsNullOrWhiteSpace(context.Id) && !string.IsNullOrWhiteSpace(context.WorkspaceId))
+                {
+                    <NavLink href="@($"/reports/{context.WorkspaceId}/{context.Id}")">@context.Id</NavLink>
+                }
+            </GridColumn>
+            <GridColumn TItem="Report" HeaderText="ReportType" class="fs-6 text-muted fw-light" PropertyName="ReportType" SortKeySelector="item => item.ReportType">
+                @context.ReportType
+            </GridColumn>
+            <GridColumn TItem="Report" HeaderText="Name" class="fs-6 text-muted fw-light" PropertyName="Name" SortKeySelector="item => item.Name">
+                @context.Name
+            </GridColumn>
+            <GridColumn TItem="Report" HeaderText="Status" class="fs-6 text-muted fw-light" PropertyName="IsActive" SortKeySelector="item => item.IsActive">
+                <span class='badge @(context.IsActive ? "text-bg-success" : "text-bg-secondary")'>@(context.IsActive ? "Active" : "Inactive")</span>
+            </GridColumn>
+            <GridColumn TItem="Report" HeaderText="IsFromPbix" class="fs-6 text-muted fw-light" PropertyName="IsFromPbix" SortKeySelector="item => item.IsFromPbix">
+                @context.IsFromPbix
+            </GridColumn>
+            <GridColumn TItem="Report" HeaderText="DatasetId" class="fs-6 text-muted fw-light" PropertyName="DatasetId" SortKeySelector="item => item.DatasetId">
+                @if (!string.IsNullOrWhiteSpace(context.DatasetId))
+                {
+                    <NavLink href="@GetDatasetDetailsLink(context)">@context.DatasetId</NavLink>
+                }
+            </GridColumn>
+            <GridColumn TItem="Report" HeaderText="DatasetWorkspaceId" class="fs-6 text-muted fw-light" PropertyName="DatasetWorkspaceId" SortKeySelector="item => item.DatasetWorkspaceId">
+                @if (!string.IsNullOrWhiteSpace(context.DatasetWorkspaceId))
+                {
+                    <NavLink href="@($"/workspaces/details/{context.DatasetWorkspaceId}")">@context.DatasetWorkspaceId</NavLink>
+                }
+            </GridColumn>
+        </GridColumns>
+    </Grid>
+}
+
+@code {
+    [Parameter]
+    public IEnumerable<Report>? Items { get; set; }
+
+    [Parameter]
+    public Func<Report, string> DatasetLink { get; set; } = _ => "/datasets";
+
+    private string GetDatasetDetailsLink(Report report) => DatasetLink(report);
+
+    private Task<GridDataProviderResult<Report>> LoadItems(GridDataProviderRequest<Report> request)
+    {
+        return Task.FromResult(request.ApplyTo(Items?.ToList() ?? new List<Report>()));
+    }
+}

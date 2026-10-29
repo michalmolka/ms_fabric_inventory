@@ -1,0 +1,57 @@
+@using BlazorBootstrap
+@using Models
+
+@if (Items == null)
+{
+    <p>No data.</p>
+}
+else
+{
+    <Grid TItem="Workspace"
+          Class="table table-hover table-bordered table-striped"
+          DataProvider="LoadItems"
+          AllowFiltering="true"
+          AllowPaging="true"
+          PageSize="15"
+          AllowSorting="true"
+          Responsive="true">
+        <GridColumns>
+            <GridColumn TItem="Workspace" HeaderText="Id" class="fs-6 text-muted fw-light" PropertyName="Id" SortKeySelector="item => item.Id">
+                @if (!string.IsNullOrWhiteSpace(context.Id))
+                {
+                    <NavLink href="@($"/workspaces/details/{context.Id}")">@context.Id</NavLink>
+                }
+            </GridColumn>
+            <GridColumn TItem="Workspace" HeaderText="Name" class="fs-6 text-muted fw-light" PropertyName="Name" SortKeySelector="item => item.Name">
+                @context.Name
+            </GridColumn>
+            <GridColumn TItem="Workspace" HeaderText="Status" class="fs-6 text-muted fw-light" PropertyName="IsActive" SortKeySelector="item => item.IsActive">
+                <span class='badge @(context.IsActive ? "text-bg-success" : "text-bg-secondary")'>@(context.IsActive ? "Active" : "Inactive")</span>
+            </GridColumn>
+            <GridColumn TItem="Workspace" HeaderText="CapacityId" class="fs-6 text-muted fw-light" PropertyName="CapacityId" SortKeySelector="item => item.CapacityId">
+                @context.CapacityId
+            </GridColumn>
+            <GridColumn TItem="Workspace" HeaderText="References" class="fs-6 text-muted fw-light" PropertyName="Id">
+                @if (!string.IsNullOrWhiteSpace(context.Id))
+                {
+                    <span class="workspace-ref-links">
+                        <NavLink href="@($"/reports/{context.Id}")">Reports</NavLink>
+                        <NavLink href="@($"/datasets/{context.Id}")">Datasets</NavLink>
+                        <NavLink href="@($"/lakehouses/{context.Id}")">Lakehouses</NavLink>
+                        <NavLink href="@($"/warehouses/{context.Id}")">Warehouses</NavLink>
+                    </span>
+                }
+            </GridColumn>
+        </GridColumns>
+    </Grid>
+}
+
+@code {
+    [Parameter]
+    public IEnumerable<Workspace>? Items { get; set; }
+
+    private Task<GridDataProviderResult<Workspace>> LoadItems(GridDataProviderRequest<Workspace> request)
+    {
+        return Task.FromResult(request.ApplyTo(Items?.ToList() ?? new List<Workspace>()));
+    }
+}
