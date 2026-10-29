@@ -1,8 +1,9 @@
-# Power BI / Fabric Inventory Portal - Dokumentacja Projektu
+# Power BI / Fabric Inventory Portal – Project Documentation
 
-## 1. Cel aplikacji
+## 1. Application Purpose
 
-Aplikacja służy do przeglądania i monitorowania obiektów Microsoft Fabric / Power BI:
+The application is designed to browse and monitor Microsoft Fabric / Power BI assets, including:
+
 - Capacities
 - Workspaces
 - Datasets
@@ -10,68 +11,123 @@ Aplikacja służy do przeglądania i monitorowania obiektów Microsoft Fabric / 
 - Lakehouses
 - Warehouses
 
-Główny cel biznesowy:
-- dać użytkownikowi prosty widok inwentarza Power BI,
-- ograniczyć liczbę wywołań Power BI REST API przez cache SQL,
-- umożliwić analizę Event Log (KQL + statystyki + anomaly detection).
+### Business Objectives
 
-## 2. Jak działa aplikacja (skrót)
+- Provide users with a simple and centralized view of their Power BI inventory.
+- Reduce the number of Power BI REST API calls by using a SQL-based cache.
+- Enable Event Log analysis, including KQL querying, statistics, and anomaly detection.
 
-1. Użytkownik loguje się przez Entra ID.
-2. UI czyta dane głównie z cache w SQL.
-3. Odświeżenie danych z Fabric/Power BI zapisuje nowy stan do SQL.
-4. Brakujące rekordy nie są kasowane twardo, tylko oznaczane `IsActive = false`.
-5. Strona Event Log pozwala analizować logi:
-- ręcznie wpisując KQL,
-- albo przez `AI Mode`, który generuje propozycję KQL z promptu.
+---
 
-## 3. Moduły funkcjonalne
+## 2. How the Application Works
 
-## 3.1 Inwentarz obiektów
-- Strony: `Capacities`, `Workspaces`, `Datasets`, `Reports`, `Lakehouses`, `Warehouses`.
-- Tabele z filtrowaniem/sortowaniem i przejściem do `Details`.
-- Lakehouse/Warehouse details pobierają świeże dane z Fabric REST API dla workspace i wybierają konkretny item po ID.
+1. Users authenticate through Microsoft Entra ID.
+2. The UI primarily reads data from the SQL cache.
+3. Refresh operations retrieve the latest state from Microsoft Fabric / Power BI and store it in SQL Server.
+4. Missing objects are not physically deleted; instead, they are marked as `IsActive = false`.
+5. The Event Log page allows users to analyze logs:
+   - by manually writing KQL queries,
+   - or through **AI Mode**, which generates KQL suggestions from natural-language prompts.
 
-## 3.2 Cache SQL
-- Źródło odczytu dla UI.
-- Tabele modelowe: Capacity, Workspace, Dataset, Report, Lakehouse, Warehouse.
-- Status rekordu: aktywny/nieaktywny.
+---
 
-## 3.3 Event Log
-- `KQL Query` (manualne zapytania).
-- `Aggregated Logs` i `Anomaly Detection`.
-- `Table Summary`.
-- `AI Mode`:
-  - użytkownik wpisuje prompt,
-  - model generuje propozycję KQL,
-  - użytkownik klika `Apply`, żeby przenieść query do głównego pola.
+## 3. Functional Modules
 
-## 3.4 Role i dostęp
-- Grupa administracyjna Entra ID: `PowerBiInventoryAdmin`.
-- Admin ma rozszerzony dostęp do obiektów i logiki odczytu.
-- Dla zwykłych użytkowników działa cache uprawnień per user.
+### 3.1 Asset Inventory
 
-## 4. Architektura techniczna
+Pages:
 
-- Frontend/Server: Blazor Server (`blz0/blz0`).
-- Baza: SQL Server + EF Core.
-- Integracje:
-  - Power BI REST API,
-  - Fabric REST API,
-  - Kusto (Event Log),
-  - Entra ID (auth),
-  - LM Studio (AI generowanie KQL).
+- Capacities
+- Workspaces
+- Datasets
+- Reports
+- Lakehouses
+- Warehouses
 
-Statyczne assety:
-- Bootstrap ma lokalną kopię w `wwwroot/lib/bootstrap` jako fallback dla środowisk Docker/dev bez stabilnego dostępu do CDN.
-- Bootstrap Icons są odtwarzane lokalnie przez `libman.json` do `wwwroot/lib/bootstrap-icons`.
+Features:
 
-Szczegóły architektury:
-- [architecture.md](architecture.md)
+- Filtering and sorting
+- Navigation to detailed views
+- Lakehouse and Warehouse details retrieve fresh data from the Fabric REST API for the selected workspace and resolve the requested item by ID
 
-## 5. Konfiguracja
+### 3.2 SQL Cache
 
-Najważniejsze sekcje konfiguracyjne:
+The primary data source for the UI.
+
+Core entities:
+
+- Capacity
+- Workspace
+- Dataset
+- Report
+- Lakehouse
+- Warehouse
+
+Each record can be marked as:
+
+- Active
+- Inactive
+
+### 3.3 Event Log
+
+Features include:
+
+- **KQL Query** for manual log analysis
+- **Aggregated Logs**
+- **Anomaly Detection**
+- **Table Summary**
+
+#### AI Mode
+
+1. The user enters a natural-language prompt.
+2. The AI model generates a proposed KQL query.
+3. The user clicks **Apply** to copy the generated query into the main query editor.
+
+### 3.4 Roles and Access Control
+
+An Entra ID administrative group named `PowerBiInventoryAdmin` is used to manage elevated access.
+
+Administrators have:
+
+- Extended visibility into application objects
+- Additional access to administrative functionality
+
+Regular users operate through a per-user permissions cache.
+
+---
+
+## 4. Technical Architecture
+
+### Technology Stack
+
+- Frontend / Server: Blazor Server (`blz0/blz0`)
+- Database: SQL Server + Entity Framework Core
+
+### Integrations
+
+- Power BI REST API
+- Fabric REST API
+- Azure Data Explorer (Kusto)
+- Microsoft Entra ID (authentication)
+- LM Studio (AI-powered KQL generation)
+
+### Static Assets
+
+- Bootstrap is stored locally under `wwwroot/lib/bootstrap` as a fallback for Docker and development environments without reliable CDN access.
+- Bootstrap Icons are downloaded locally via `libman.json` into `wwwroot/lib/bootstrap-icons`.
+
+### Architecture Details
+
+See:
+
+- `architecture.md`
+
+---
+
+## 5. Configuration
+
+### Key Configuration Sections
+
 - `ConnectionStrings:blz0ContextSql`
 - `ApiCredentials:*`
 - `AzureAd:*`
@@ -79,38 +135,89 @@ Najważniejsze sekcje konfiguracyjne:
 - `Authorization:*`
 - `LmStudio:*`
 
-Wymagane delegated scopes:
-- Power BI REST: zakresy skonfigurowane po stronie Power BI API i używane przez `.default`.
-- Fabric REST: `Workspace.Read.All`.
-- Fabric Lakehouse tables: `Lakehouse.Read.All`.
-- Fabric Warehouse SQL endpoint: delegated access dla `https://database.windows.net/.default`.
+### Required Delegated Permissions
 
-Przykład dev (LM Studio):
-- `LmStudio:BaseUrl = http://host.docker.internal:1234`
-- `LmStudio:Model = openai/gpt-oss-20b`
+#### Power BI REST API
 
-## 6. Uruchomienie (dev)
+Permissions configured on the Power BI API and accessed through `.default`.
 
-1. Uruchom SQL Server.
-2. Ustaw `.env` / `appsettings.Development.json`.
-3. Wykonaj migracje EF.
-4. Uruchom aplikację.
+#### Fabric REST API
 
-Komendy i szczegóły są w:
-- [README.md](../README.md)
+- `Workspace.Read.All`
 
-## 7. Utrzymanie i troubleshooting
+#### Fabric Lakehouse Access
 
-Typowe problemy:
-- 401/403 z Power BI API: brak scope/consent lub zły tryb auth.
-- `WorkspaceTypeNotSupported` przy lakehouse/warehouse: workspace nie obsługuje Fabric item API; globalny refresh pomija takie workspace’y.
-- Problem certyfikatów HTTPS w kontenerze: użyj poprawnego profilu uruchomienia i ustawień hosta.
-- AI Mode nie odpowiada: sprawdź, czy LM Studio działa i czy endpoint jest osiągalny z kontenera.
+- `Lakehouse.Read.All`
 
-## 8. Kierunki rozwoju
+#### Fabric Warehouse SQL Endpoint
 
-- Zapisywanie historii prompt -> wygenerowane KQL.
-- Walidacja/normalizacja KQL przed uruchomieniem.
-- Rozszerzenie dashboardów Event Log o gotowe scenariusze analityczne.
-- Dalsza optymalizacja cache per user i limitowanie calli do REST API.
-- Opcjonalnie: przejście lakehouse/warehouse details z workspace-list lookup na dedykowane `GET item by id`, jeżeli aplikacja dostanie zgodę na szersze Fabric item scopes.
+Delegated access to:
+
+`https://database.windows.net/.default`
+
+### Development Example (LM Studio)
+
+```text
+LmStudio:BaseUrl = http://host.docker.internal:1234
+LmStudio:Model = openai/gpt-oss-20b
+```
+
+---
+
+## 6. Running the Application (Development)
+
+1. Start SQL Server.
+2. Configure `.env` and/or `appsettings.Development.json`.
+3. Apply Entity Framework migrations.
+4. Start the application.
+
+Additional commands and setup instructions are available in:
+
+- `README.md`
+
+---
+
+## 7. Maintenance and Troubleshooting
+
+### Common Issues
+
+#### 401 / 403 Errors from Power BI API
+
+Usually caused by:
+
+- Missing API permissions
+- Missing admin consent
+- Incorrect authentication configuration
+
+#### `WorkspaceTypeNotSupported` for Lakehouses or Warehouses
+
+The workspace does not support Fabric Item APIs.
+
+Global refresh operations automatically skip unsupported workspaces.
+
+#### HTTPS Certificate Issues in Containers
+
+Verify:
+
+- Launch profile configuration
+- Host certificate settings
+- Container networking configuration
+
+#### AI Mode Is Not Responding
+
+Verify that:
+
+- LM Studio is running
+- The configured endpoint is reachable from the application container
+
+---
+
+## 8. Future Enhancements
+
+Potential future improvements include:
+
+- Storing prompt-to-generated-KQL history
+- KQL validation and normalization before execution
+- Additional Event Log dashboards with predefined analytical scenarios
+- Further optimization of per-user caching and REST API call reduction
+- Optional migration of Lakehouse and Warehouse details from workspace-level lookups to dedicated **Get Item By ID** endpoints if broader Fabric Item API permissions become available
