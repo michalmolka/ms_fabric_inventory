@@ -21,19 +21,19 @@
     "PATH": "${containerEnv:PATH}:/home/vscode/.dotnet/tools"
   },
   "forwardPorts": [
-    5171,
-    7038
+    5172,
+    7040
   ],
   "portsAttributes": {
-    "5171": {
+    "5172": {
       "label": "Blazor HTTP",
       "onAutoForward": "notify"
     },
-    "7038": {
+    "7040": {
       "label": "Blazor HTTPS",
       "onAutoForward": "silent"
     }
   },
-  "postCreateCommand": "dotnet restore blz0.sln && (dotnet tool update --global dotnet-ef --version 9.0.2 || dotnet tool install --global dotnet-ef --version 9.0.2)",
+  "postCreateCommand": "mkdir -p /home/vscode/.aspnet/https && dotnet dev-certs https -ep /home/vscode/.aspnet/https/blz0-dev.pfx -p blz0-dev-pass && dotnet restore blz0.sln && (dotnet tool update --global dotnet-ef --version 9.0.2 || dotnet tool install --global dotnet-ef --version 9.0.2)",
   "remoteUser": "vscode"
 }

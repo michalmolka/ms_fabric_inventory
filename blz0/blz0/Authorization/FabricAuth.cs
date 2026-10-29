@@ -29,9 +29,15 @@ namespace blz0.Authorization
 
             _configuration = builder.Build();
 
-            TenantId = _configuration["ApiCredentials:tenantId"];
-            ClientId = _configuration["ApiCredentials:clientId"];
-            ClientSecret = _configuration["ApiCredentials:clientSecret"];
+            TenantId = _configuration["Kusto:tenantId"]
+                ?? _configuration["PowerBiServicePrincipal:tenantId"]
+                ?? _configuration["ApiCredentials:tenantId"];
+            ClientId = _configuration["Kusto:clientId"]
+                ?? _configuration["PowerBiServicePrincipal:clientId"]
+                ?? _configuration["ApiCredentials:clientId"];
+            ClientSecret = _configuration["Kusto:clientSecret"]
+                ?? _configuration["PowerBiServicePrincipal:clientSecret"]
+                ?? _configuration["ApiCredentials:clientSecret"];
             ClusterUri = _configuration["Kusto:clusterUri"];
             KqlDatabase = _configuration["Kusto:kqlDatabase"];
         }

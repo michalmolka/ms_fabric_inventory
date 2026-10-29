@@ -2,6 +2,20 @@
 
 A Blazor Server portal for browsing Microsoft Fabric / Power BI objects (capacities, workspaces, datasets, reports, lakehouses, warehouses), refreshing metadata from REST API, and analyzing Event Log anomalies.
 
+Example 01
+![Prompt01](images/ms-fabric-inventory-01.png)
+
+
+Example 02
+![Prompt02](images/ms-fabric-inventory-02.png)
+
+Example 03
+![Prompt01](images/ms-fabric-inventory-03.png)
+
+
+Example 04
+![Prompt02](images/ms-fabric-inventory-04.png)
+
 ## Key Features
 
 - Entra ID sign-in (only authenticated users can access the app).
