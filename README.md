@@ -69,6 +69,55 @@ Kusto__clusterUri=...
 Kusto__kqlDatabase=...
 ```
 
+### Service Principal Configuration
+
+The application uses two Azure Entra ID application registrations:
+
+#### ApiCredentials (`ApiCredentials__clientId`)
+
+Primary application registration used for authentication and access to Microsoft Graph and Azure SQL resources.
+
+Required permissions:
+
+**Microsoft Graph**
+- Directory.Read.All (Application)
+- GroupMember.Read.All (Application)
+- User.Read (Delegated)
+- profile (Delegated)
+- email (Delegated)
+- openid (Delegated)
+- offline_access (Delegated)
+
+**Azure SQL Database**
+- user_impersonation (Delegated)
+
+#### PowerBiServicePrincipal (`PowerBiServicePrincipal__clientId`)
+
+Application registration used for Microsoft Fabric and Power BI access.
+
+Required permissions:
+
+**Power BI Service**
+- Tenant.Read.All (Application)
+- Tenant.ReadWrite.All (Application)
+- Dataset.Read.All (Delegated)
+- Dataset.ReadWrite.All (Delegated)
+
+Additional delegated permissions required for Fabric artifact discovery:
+
+- Workspace.Read.All
+- Report.Read.All
+- Capacity.Read.All
+- Lakehouse.Read.All
+- Warehouse.Read.All
+- SQLDatabase.Read.All
+- SQLEndpoint.Read.All
+- Eventhouse.Read.All
+- Eventstream.Read.All
+
+**Azure Data Explorer (Kusto)**
+- user_impersonation (Delegated)
+
 ### Entra ID Settings
 
 The app reads `AzureAd:*` settings.
